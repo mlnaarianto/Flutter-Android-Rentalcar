@@ -22,16 +22,15 @@ class _ProfilPageState extends State<ProfilPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _tglLahirController = TextEditingController();
   final TextEditingController _hpController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController(); // ✅ Tambahan Controller Alamat
 
   File? avatarImage;
   String? avatarUrl;
   
   File? ktpImage;
-  String? ktpUrl; // ✅ Tambahan: Untuk menyimpan URL KTP lama dari database
+  String? ktpUrl;
 
   bool _isLoading = true;
-
-  // final String apiUrl = "http://192.168.189.7:8000/api";
 
   @override
   void initState() {
@@ -61,7 +60,6 @@ class _ProfilPageState extends State<ProfilPage> {
         final Map<String, dynamic> responseData = jsonDecode(response.body);
         final userData = responseData['data'];
         
-        // ✅ Ambil relasi personal_data
         final personalData = userData['personal_data'] ?? {}; 
 
         final String? fetchedAvatar = userData['avatar'];
@@ -73,9 +71,9 @@ class _ProfilPageState extends State<ProfilPage> {
           _namaController.text = userData['name'] ?? '';
           _emailController.text = userData['email'] ?? '';
           
-          // ✅ Ambil data dari tabel personal_data
           _hpController.text = personalData['phone'] ?? '';
           _tglLahirController.text = personalData['birth_date'] ?? '';
+          _addressController.text = personalData['address'] ?? ''; // ✅ Ambil data alamat
           ktpUrl = personalData['ktp_image']; 
           
           avatarUrl = fetchedAvatar;
@@ -142,7 +140,6 @@ class _ProfilPageState extends State<ProfilPage> {
   Future<void> _saveProfile() async {
     if (_formKey.currentState!.validate()) {
       
-      // ✅ Cek KTP: Wajib upload HANYA JIKA file baru kosong DAN KTP di DB juga kosong
       if (ktpImage == null && ktpUrl == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Foto KTP wajib diupload pertama kali")),
@@ -158,21 +155,20 @@ class _ProfilPageState extends State<ProfilPage> {
           throw Exception("Token tidak ditemukan, silakan login ulang.");
         }
 
-        // ✅ URL diganti ke /user (RESTful)
         final request = http.MultipartRequest(
-          'POST', // Tetap POST agar file bisa dikirim
+          'POST',
           Uri.parse(ApiConfig.userProfile),
         );
 
         request.headers['Authorization'] = 'Bearer $token';
         request.headers['Accept'] = 'application/json';
 
-        // ✅ METHOD SPOOFING: Beritahu Laravel bahwa ini adalah PATCH
         request.fields['_method'] = 'PATCH';
 
         request.fields['name'] = _namaController.text;
         request.fields['phone'] = _hpController.text;
         request.fields['birth_date'] = _tglLahirController.text;
+        request.fields['address'] = _addressController.text; // ✅ Kirim data alamat ke backend
 
         if (ktpImage != null) {
           request.files.add(
@@ -356,6 +352,21 @@ class _ProfilPageState extends State<ProfilPage> {
                           : null,
                     ),
 
+                    const SizedBox(height: 15),
+
+                    /// ================= ALAMAT =================
+                    TextFormField(
+                      controller: _addressController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: "Alamat Lengkap",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.home),
+                      ),
+                      validator: (v) =>
+                          v == null || v.isEmpty ? "Alamat wajib diisi" : null,
+                    ),
+
                     const SizedBox(height: 25),
 
                     /// ================= KTP =================
@@ -375,7 +386,6 @@ class _ProfilPageState extends State<ProfilPage> {
                             border: Border.all(color: Colors.blue, width: 1.5),
                             color: Colors.blue.withOpacity(0.05),
                           ),
-                          // ✅ Tampilkan KTP dari file, ATAU dari URL database, ATAU placeholder
                           child: ktpImage == null
                               ? (ktpUrl != null
                                   ? ClipRRect(

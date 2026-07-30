@@ -2,7 +2,7 @@
 
 class ApiConfig {
   // ⚠️ Cukup ganti IP di sini, semua file akan otomatis mengikuti
-  static const String baseUrl = 'http://172.20.74.21:8000/api';
+  static const String baseUrl = 'http://192.168.189.7:8000/api';
 
   // Kumpulan Endpoint
   static const String googleLogin = '$baseUrl/auth/google/mobile';
