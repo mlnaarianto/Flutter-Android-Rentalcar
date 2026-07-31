@@ -22,7 +22,7 @@ class _ProfilPageState extends State<ProfilPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _tglLahirController = TextEditingController();
   final TextEditingController _hpController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController(); // ✅ Tambahan Controller Alamat
+  final TextEditingController _addressController = TextEditingController();
 
   File? avatarImage;
   String? avatarUrl;
@@ -42,7 +42,8 @@ class _ProfilPageState extends State<ProfilPage> {
   Future<void> _fetchUserData() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
+      // 👇 UBAH DARI 'auth_token' MENJADI 'access_token'
+      String? token = prefs.getString('access_token');
 
       if (token == null) {
         throw Exception("Token tidak ditemukan, silakan login ulang.");
@@ -73,7 +74,7 @@ class _ProfilPageState extends State<ProfilPage> {
           
           _hpController.text = personalData['phone'] ?? '';
           _tglLahirController.text = personalData['birth_date'] ?? '';
-          _addressController.text = personalData['address'] ?? ''; // ✅ Ambil data alamat
+          _addressController.text = personalData['address'] ?? '';
           ktpUrl = personalData['ktp_image']; 
           
           avatarUrl = fetchedAvatar;
@@ -149,7 +150,8 @@ class _ProfilPageState extends State<ProfilPage> {
 
       try {
         SharedPreferences prefs = await SharedPreferences.getInstance();
-        String? token = prefs.getString('auth_token');
+        // 👇 UBAH DARI 'auth_token' MENJADI 'access_token'
+        String? token = prefs.getString('access_token');
 
         if (token == null) {
           throw Exception("Token tidak ditemukan, silakan login ulang.");
@@ -168,7 +170,7 @@ class _ProfilPageState extends State<ProfilPage> {
         request.fields['name'] = _namaController.text;
         request.fields['phone'] = _hpController.text;
         request.fields['birth_date'] = _tglLahirController.text;
-        request.fields['address'] = _addressController.text; // ✅ Kirim data alamat ke backend
+        request.fields['address'] = _addressController.text;
 
         if (ktpImage != null) {
           request.files.add(
@@ -255,7 +257,7 @@ class _ProfilPageState extends State<ProfilPage> {
                                   ? FileImage(avatarImage!) as ImageProvider
                                   : (avatarUrl != null
                                       ? NetworkImage(avatarUrl!)
-                                      : const AssetImage("assets/anya.jpg")),
+                                      : const AssetImage("assets/anya.jpg") as ImageProvider),
                             ),
                             Positioned(
                               bottom: 0,

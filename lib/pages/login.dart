@@ -84,15 +84,22 @@ class _LoginPageState extends State<LoginPage> {
         final String sanctumToken = data['access_token'];
         final userData = data['user'];
 
-        // Simpan token dan data user ke SharedPreferences
+        // Simpan token dan data user ke SharedPreferences dengan key 'access_token'
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('auth_token', sanctumToken);
+        await prefs.setString('access_token', sanctumToken); // 👈 Disamakan dengan AppLayout
 
         if (userData != null) {
           await prefs.setString('user_name', userData['name'] ?? '');
           await prefs.setString('user_email', userData['email'] ?? '');
+          
           if (userData['avatar'] != null) {
             await prefs.setString('avatar_url', userData['avatar']);
+          }
+
+          // 👇 Simpan role Spatie agar terbaca di Sidebar
+          if (userData['roles'] != null) {
+            List<String> rolesList = List<String>.from(userData['roles']);
+            await prefs.setStringList('user_roles', rolesList);
           }
         }
 
