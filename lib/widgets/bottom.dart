@@ -7,6 +7,7 @@ import 'package:rentalcar/pages/login.dart';
 import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/menu/dashboard.dart';
+import 'package:rentalcar/menu/car.dart'; 
 import 'package:rentalcar/config/api_config.dart';
 
 class Bottom extends StatefulWidget {
@@ -25,20 +26,24 @@ class Bottom extends StatefulWidget {
 
 class _BottomState extends State<Bottom> {
   String? _avatarUrl;
+  String? _userRole; // 👈 Variabel untuk menyimpan role user yang sedang login
 
   @override
   void initState() {
     super.initState();
-    _loadAvatar();
+    _loadUserData();
   }
 
-  /// ================== LOAD AVATAR DARI SHARED PREFERENCES ==================
-  Future<void> _loadAvatar() async {
+  /// ================== LOAD AVATAR & ROLE DARI SHARED PREFERENCES ==================
+  Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     final String? url = prefs.getString('avatar_url');
+    final String? role = prefs.getString('role'); // Ambil role yang tersimpan
+
     if (mounted) {
       setState(() {
         _avatarUrl = url;
+        _userRole = role;
       });
     }
   }
@@ -65,13 +70,10 @@ class _BottomState extends State<Bottom> {
 
     if (result == true) {
       try {
-        // 1. Ambil token dari penyimpanan HP
         final prefs = await SharedPreferences.getInstance();
-        final String? token = prefs.getString('auth_token');
+        final String? token = prefs.getString('access_token');
 
-        // 2. Hapus token dari server Laravel
         if (token != null) {
-          // final String apiUrl = 'http://192.168.189.7:8000/api/logout';
           await http.post(
             Uri.parse(ApiConfig.logout),
             headers: {
@@ -81,22 +83,20 @@ class _BottomState extends State<Bottom> {
           );
         }
 
-        // 3. Hapus semua data dari penyimpanan HP
-        await prefs.remove('auth_token');
-        await prefs.remove('avatar_url'); // ✅ hapus juga avatar
+        await prefs.remove('access_token');
+        await prefs.remove('avatar_url'); 
+        await prefs.remove('role'); // Hapus data role saat logout
 
-        // 4. Logout dari Google SDK
         final GoogleSignIn googleSignIn = GoogleSignIn();
         await googleSignIn.signOut();
       } catch (e) {
         print('Error saat logout: $e');
-        // Fallback: tetap paksa hapus token lokal
         final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('auth_token');
+        await prefs.remove('access_token');
         await prefs.remove('avatar_url');
+        await prefs.remove('role');
       }
 
-      // 5. Tendang user kembali ke halaman Login
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -144,7 +144,6 @@ class _BottomState extends State<Bottom> {
       backgroundColor: isActive ? Colors.blue : Colors.grey.shade300,
       child: CircleAvatar(
         radius: 12,
-        // ✅ Prioritas: URL dari API → fallback ke asset lokal
         backgroundImage: (_avatarUrl != null && _avatarUrl!.isNotEmpty)
             ? NetworkImage(_avatarUrl!) as ImageProvider
             : const AssetImage('assets/anya.jpg'),
@@ -161,24 +160,31 @@ class _BottomState extends State<Bottom> {
       selectedItemColor: Colors.blue,
       onTap: (index) {
         if (index == 0) {
-          // HOME → DASHBOARD
+          // Home / Dashboard
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (_) => const Dashboard()),
             (route) => false,
           );
+        } else if (index == 1) {
+          // Navigasi ke Halaman Mobil
+          // Mengirim role ke halaman CarPage jika diperlukan untuk pembatasan tombol tambah
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const CarPage()),
+          );
         } else if (index == 2) {
-          // CHAT
+          // Chat
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const ChatPage()),
           );
         } else if (index == 3) {
-          // PROFILE → reload avatar setelah kembali dari halaman profil
+          // Profile
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const ProfilPage()),
-          ).then((_) => _loadAvatar()); // ✅ refresh avatar setelah balik dari profil
+          ).then((_) => _loadUserData());
         } else {
           widget.onTap(index);
         }
@@ -188,9 +194,10 @@ class _BottomState extends State<Bottom> {
           icon: Icon(Icons.dashboard),
           label: 'Home',
         ),
-        const BottomNavigationBarItem(
-          icon: Icon(Icons.car_rental),
-          label: 'Mobil',
+        BottomNavigationBarItem(
+          icon: const Icon(Icons.car_rental),
+          // Label bisa dikustomisasi jika ingin memperlihatkan konteks role
+          label: _userRole == 'Penyewa' ? 'Cari Mobil' : 'Mobil',
         ),
         const BottomNavigationBarItem(
           icon: Icon(Icons.chat_bubble_outline),
@@ -199,7 +206,7 @@ class _BottomState extends State<Bottom> {
         BottomNavigationBarItem(
           icon: GestureDetector(
             onLongPress: () => _showProfileMenu(context),
-            child: _buildAvatar(), // ✅ pakai widget avatar dinamis
+            child: _buildAvatar(),
           ),
           label: 'Profile',
         ),

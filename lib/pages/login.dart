@@ -84,9 +84,9 @@ class _LoginPageState extends State<LoginPage> {
         final String sanctumToken = data['access_token'];
         final userData = data['user'];
 
-        // Simpan token dan data user ke SharedPreferences dengan key 'access_token'
+        // Simpan token dan data user ke SharedPreferences
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('access_token', sanctumToken); // 👈 Disamakan dengan AppLayout
+        await prefs.setString('access_token', sanctumToken);
 
         if (userData != null) {
           await prefs.setString('user_name', userData['name'] ?? '');
@@ -96,10 +96,18 @@ class _LoginPageState extends State<LoginPage> {
             await prefs.setString('avatar_url', userData['avatar']);
           }
 
-          // 👇 Simpan role Spatie agar terbaca di Sidebar
+          // 👇 SIMPAN ROLE SPATIE DENGAN BENAR
           if (userData['roles'] != null) {
-            List<String> rolesList = List<String>.from(userData['roles']);
+            List<dynamic> rawRoles = userData['roles'];
+            List<String> rolesList = rawRoles.map((e) => e.toString()).toList();
+            
+            // Simpan sebagai List untuk pengecekan fleksibel
             await prefs.setStringList('user_roles', rolesList);
+            
+            // Simpan juga string role pertama untuk kemudahan akses (misal: 'Perental' atau 'Penyewa')
+            if (rolesList.isNotEmpty) {
+              await prefs.setString('role', rolesList.first);
+            }
           }
         }
 
