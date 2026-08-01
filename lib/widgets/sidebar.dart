@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:rentalcar/menu/rentals_booking_page.dart'; // 👈 Import halaman manajemen pesanan & driver
+import 'package:rentalcar/menu/rentals_booking_page.dart';
+import 'package:rentalcar/menu/chat.dart';
 
 class Sidebar extends StatefulWidget {
   final String userName;
@@ -20,28 +21,33 @@ class Sidebar extends StatefulWidget {
 
 class _SidebarState extends State<Sidebar> {
   String? _avatarUrl;
+  String? _userId; // Tambahan untuk menyimpan ID user aktif
 
   @override
   void initState() {
     super.initState();
-    _loadAvatar();
+    _loadUserData();
   }
 
-  // Mengambil avatar tersimpan dari SharedPreferences secara real-time
-  Future<void> _loadAvatar() async {
+  // Mengambil avatar dan ID user tersimpan dari SharedPreferences
+  Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _avatarUrl = prefs.getString('avatar_url');
+      // Ambil id user dari local storage, sesuaikan key-nya dengan aplikasi Anda (misal: 'user_id' atau 'id')
+      _userId = prefs.getString('user_id') ?? '3';
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Setiap kali widget dibangun, pastikan avatar ter-refresh jika ada perubahan
-    _loadAvatar();
+    final List<String> rolesList = widget.userRoles
+        .map((role) => role.toString())
+        .toList();
 
-    final List<String> rolesList = widget.userRoles.map((role) => role.toString()).toList();
-
+    // Membuat chatId unik berdasarkan email atau userId agar privat antara user & admin
+    final String uniqueChatId =
+        'room_user_${widget.userEmail.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
@@ -52,7 +58,6 @@ class _SidebarState extends State<Sidebar> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                // Avatar otomatis mendeteksi foto profil dari SharedPreferences atau fallback ke Asset
                 CircleAvatar(
                   radius: 28,
                   backgroundColor: Colors.white,
@@ -63,7 +68,11 @@ class _SidebarState extends State<Sidebar> {
                 const SizedBox(height: 8),
                 Text(
                   widget.userName,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 Text(
                   widget.userEmail,
@@ -71,20 +80,27 @@ class _SidebarState extends State<Sidebar> {
                 ),
                 const SizedBox(height: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     rolesList.isNotEmpty ? rolesList.join(', ') : 'No Role',
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          
+
           ListTile(
             leading: const Icon(Icons.dashboard),
             title: const Text('Dashboard'),
@@ -99,42 +115,76 @@ class _SidebarState extends State<Sidebar> {
               Navigator.pop(context);
             },
           ),
-          
-          // 👇 Menu Khusus Perental / Super Admin untuk Kelola Pesanan & Driver
-          if (rolesList.contains('Perental') || rolesList.contains('Super Admin')) ...[
+
+          // Menu Chat (Terhubung privat ke Admin sesuai user yang login)
+          ListTile(
+            leading: const Icon(Icons.chat, color: Colors.blue),
+            title: const Text('Chat'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatPage(
+                    chatId: uniqueChatId,
+                    currentUserId: _userId ?? '3',
+                    currentUserName: widget.userName,
+                  ),
+                ),
+              );
+            },
+          ),
+
+          if (rolesList.contains('Perental') ||
+              rolesList.contains('Super Admin')) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Text(
                 'MANAJEMEN RENTAL',
-                style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.assignment_turned_in, color: Colors.blue),
+              leading: const Icon(
+                Icons.assignment_turned_in,
+                color: Colors.blue,
+              ),
               title: const Text('Kelola Pesanan & Driver'),
               onTap: () {
-                Navigator.pop(context); // Tutup drawer sidebar
+                Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const RentalsBookingPage()),
+                  MaterialPageRoute(
+                    builder: (context) => const RentalsBookingPage(),
+                  ),
                 );
               },
             ),
           ],
 
-          // 👇 Menu Khusus Super Admin
           if (rolesList.contains('Super Admin')) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Text(
                 'ADMINISTRATOR',
-                style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.admin_panel_settings, color: Colors.red),
+              leading: const Icon(
+                Icons.admin_panel_settings,
+                color: Colors.red,
+              ),
               title: const Text('Manajemen User'),
               onTap: () {
                 Navigator.pop(context);

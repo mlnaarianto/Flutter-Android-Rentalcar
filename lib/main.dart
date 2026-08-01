@@ -1,7 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'pages/homepage.dart';
+import 'firebase_options.dart'; // 👈 1. Import file options yang baru dibuat
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    // 👈 2. Masukkan options di sini agar Firebase tahu kredensial project-nya
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint("Firebase init error: $e");
+  }
+
   runApp(const MyApp());
 }
 
