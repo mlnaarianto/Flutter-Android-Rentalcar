@@ -24,9 +24,7 @@ class _ProfilPageState extends State<ProfilPage> {
   final TextEditingController _hpController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
 
-  File? avatarImage;
   String? avatarUrl;
-  
   File? ktpImage;
   String? ktpUrl;
 
@@ -42,7 +40,6 @@ class _ProfilPageState extends State<ProfilPage> {
   Future<void> _fetchUserData() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      // 👇 UBAH DARI 'auth_token' MENJADI 'access_token'
       String? token = prefs.getString('access_token');
 
       if (token == null) {
@@ -93,19 +90,6 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= AVATAR =================
-  Future<void> _pickAvatar() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-
-    if (image != null) {
-      setState(() {
-        avatarImage = File(image.path);
-      });
-    }
-  }
-
   /// ================= DATE =================
   Future<void> _pickDate() async {
     DateTime? picked = await showDatePicker(
@@ -140,17 +124,15 @@ class _ProfilPageState extends State<ProfilPage> {
   /// ================= SAVE =================
   Future<void> _saveProfile() async {
     if (_formKey.currentState!.validate()) {
-      
       if (ktpImage == null && ktpUrl == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Foto KTP wajib diupload pertama kali")),
+          const SnackBar(content: Text("Foto KTP wajib diupload")),
         );
         return;
       }
 
       try {
         SharedPreferences prefs = await SharedPreferences.getInstance();
-        // 👇 UBAH DARI 'auth_token' MENJADI 'access_token'
         String? token = prefs.getString('access_token');
 
         if (token == null) {
@@ -167,7 +149,7 @@ class _ProfilPageState extends State<ProfilPage> {
 
         request.fields['_method'] = 'PATCH';
 
-        request.fields['name'] = _namaController.text;
+        // Hanya mengirim data personal yang wajib dilengkapi
         request.fields['phone'] = _hpController.text;
         request.fields['birth_date'] = _tglLahirController.text;
         request.fields['address'] = _addressController.text;
@@ -178,30 +160,16 @@ class _ProfilPageState extends State<ProfilPage> {
           );
         }
 
-        if (avatarImage != null) {
-          request.files.add(
-            await http.MultipartFile.fromPath('avatar', avatarImage!.path),
-          );
-        }
-
         final streamedResponse = await request.send();
         final response = await http.Response.fromStream(streamedResponse);
 
         if (response.statusCode == 200) {
-          try {
-            final responseData = jsonDecode(response.body);
-            final String? newAvatar =
-                responseData['data']?['avatar'] ?? responseData['user']?['avatar'];
-            if (newAvatar != null && newAvatar.isNotEmpty) {
-              await prefs.setString('avatar_url', newAvatar);
-              setState(() => avatarUrl = newAvatar);
-            }
-          } catch (_) {}
-
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Profil berhasil disimpan")),
+              const SnackBar(content: Text("Data personal berhasil disimpan")),
             );
+            // Kembali ke halaman sebelumnya (misal kembali ke form tambah mobil)
+            Navigator.pop(context, true);
           }
         } else {
           throw Exception("Gagal menyimpan profil (${response.statusCode})");
@@ -232,7 +200,7 @@ class _ProfilPageState extends State<ProfilPage> {
   @override
   Widget build(BuildContext context) {
     return AppLayout(
-      title: "Profil",
+      title: "Lengkapi Data Personal",
       currentIndex: 3,
       onTap: _onBottomTap,
       content: _isLoading
@@ -244,74 +212,55 @@ class _ProfilPageState extends State<ProfilPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    /// ================= AVATAR =================
+                    /// ================= AVATAR (Google Login - ReadOnly) =================
                     Center(
-                      child: GestureDetector(
-                        onTap: _pickAvatar,
-                        child: Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 45,
-                              backgroundColor: Colors.blue.withOpacity(0.1),
-                              backgroundImage: avatarImage != null
-                                  ? FileImage(avatarImage!) as ImageProvider
-                                  : (avatarUrl != null
-                                      ? NetworkImage(avatarUrl!)
-                                      : const AssetImage("assets/anya.jpg") as ImageProvider),
-                            ),
-                            Positioned(
-                              bottom: 0,
-                              right: 0,
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: const BoxDecoration(
-                                  color: Colors.blue,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.camera_alt,
-                                  size: 16,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      child: Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 45,
+                            backgroundColor: Colors.blue.withOpacity(0.1),
+                            backgroundImage: avatarUrl != null
+                                ? NetworkImage(avatarUrl!)
+                                : const AssetImage("assets/anya.jpg") as ImageProvider,
+                          ),
+                        ],
                       ),
                     ),
-
                     const SizedBox(height: 8),
                     const Center(
                       child: Text(
-                        "Ketuk untuk ganti foto profil",
+                        "Foto profil tersinkron dari akun Google",
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ),
 
                     const SizedBox(height: 25),
 
-                    /// ================= NAMA =================
+                    /// ================= NAMA (Google Login - ReadOnly) =================
                     TextFormField(
                       controller: _namaController,
+                      readOnly: true,
                       decoration: const InputDecoration(
-                        labelText: "Nama",
+                        labelText: "Nama (Akun Google)",
                         border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.black12,
+                        prefixIcon: Icon(Icons.person),
                       ),
-                      validator: (v) =>
-                          v == null || v.isEmpty ? "Nama wajib diisi" : null,
                     ),
 
                     const SizedBox(height: 15),
 
-                    /// ================= EMAIL =================
+                    /// ================= EMAIL (Google Login - ReadOnly) =================
                     TextFormField(
                       controller: _emailController,
                       readOnly: true,
                       decoration: const InputDecoration(
-                        labelText: "Email",
+                        labelText: "Email (Akun Google)",
                         border: OutlineInputBorder(),
                         filled: true,
                         fillColor: Colors.black12,
+                        prefixIcon: Icon(Icons.email),
                       ),
                     ),
 
@@ -322,7 +271,7 @@ class _ProfilPageState extends State<ProfilPage> {
                       controller: _hpController,
                       keyboardType: TextInputType.phone,
                       decoration: const InputDecoration(
-                        labelText: "Nomor HP",
+                        labelText: "Nomor HP / WhatsApp",
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.phone),
                       ),
@@ -373,7 +322,7 @@ class _ProfilPageState extends State<ProfilPage> {
 
                     /// ================= KTP =================
                     const Text(
-                      "Foto KTP",
+                      "Foto KTP (Wajib)",
                       style: TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 10),
@@ -435,8 +384,12 @@ class _ProfilPageState extends State<ProfilPage> {
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                        ),
                         onPressed: _saveProfile,
-                        child: const Text("Simpan Profil"),
+                        child: const Text("Simpan Data Personal", style: TextStyle(fontSize: 16)),
                       ),
                     ),
                   ],

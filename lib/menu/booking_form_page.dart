@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/menu/profil.dart'; // 👈 Sesuaikan path import halaman profil Anda
 
 class BookingFormPage extends StatefulWidget {
   final Map<String, dynamic> car;
@@ -17,7 +18,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _withDriver = false;
-  String _paymentMethod = 'cod'; // 👈 Default pilihan metode pembayaran ('cod' atau 'qris')
+  String _paymentMethod = 'cod'; // Default pilihan metode pembayaran ('cod' atau 'qris')
   final TextEditingController _notesController = TextEditingController();
   bool _isSubmitting = false;
 
@@ -73,6 +74,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('access_token');
 
+      if (token == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sesi habis. Silakan login kembali.')),
+        );
+        setState(() => _isSubmitting = false);
+        return;
+      }
+
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/bookings'),
         headers: {
@@ -85,7 +94,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
           'start_date': _startDate!.toIso8601String().split('T')[0],
           'end_date': _endDate!.toIso8601String().split('T')[0],
           'with_driver': _withDriver,
-          'payment_method': _paymentMethod, // 👈 Kirim pilihan metode pembayaran ke API Laravel
+          'payment_method': _paymentMethod,
           'notes': _notesController.text,
         }),
       );
@@ -96,7 +105,27 @@ class _BookingFormPageState extends State<BookingFormPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Booking berhasil dibuat! Silakan cek riwayat pesanan.')),
         );
-        Navigator.pop(context); 
+        Navigator.pop(context, true); 
+      } else if (response.statusCode == 403) {
+        String message = decoded['message'] ?? 'Akses ditolak.';
+        
+        // 🚀 Cek apakah ditolak karena data personal belum lengkap
+        if (message.contains('Data Personal')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message), backgroundColor: Colors.orange),
+          );
+          
+          // Langsung arahkan ke ProfilPage untuk melengkapi KTP & No HP
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ProfilPage()),
+            );
+          }
+        } else {
+          // Jika ditolak karena masih ada pesanan pending
+          _showPendingWarningDialog(message);
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(decoded['message'] ?? 'Gagal membuat booking')),
@@ -109,6 +138,22 @@ class _BookingFormPageState extends State<BookingFormPage> {
     } finally {
       setState(() => _isSubmitting = false);
     }
+  }
+
+  void _showPendingWarningDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Pesanan Pending Ditemukan'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -163,7 +208,6 @@ class _BookingFormPageState extends State<BookingFormPage> {
             ),
             const SizedBox(height: 12),
             
-            // Switch Opsi Menggunakan Driver
             SwitchListTile(
               title: const Text('Gunakan Jasa Sopir (Driver)', style: TextStyle(fontWeight: FontWeight.w500)),
               subtitle: Text('Tarif tambahan: Rp $_driverRatePerDay / hari'),
@@ -177,7 +221,6 @@ class _BookingFormPageState extends State<BookingFormPage> {
             ),
             const SizedBox(height: 12),
 
-            // 👇 Dropdown Pilihan Metode Pembayaran (COD / QRIS)
             DropdownButtonFormField<String>(
               value: _paymentMethod,
               decoration: const InputDecoration(

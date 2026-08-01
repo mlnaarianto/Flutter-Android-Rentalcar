@@ -21,8 +21,10 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   void initState() {
     super.initState();
     _fetchNotifications();
+    _markNotificationsAsRead(); // 🟢 Otomatis tandai sudah dibaca saat halaman dibuka
   }
 
+  /// ================= AMBIL DATA NOTIFIKASI =================
   Future<void> _fetchNotifications() async {
     setState(() {
       _isLoading = true;
@@ -55,9 +57,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
           _notifications = decoded['data'] ?? [];
           _isLoading = false;
         });
-
-        // 🟢 Otomatis simpan tanda bahwa semua notifikasi sudah dibaca (titik merah hilang)
-        await prefs.setBool('has_unread_notifications', false);
       } else {
         setState(() {
           _errorMessage = 'Gagal memuat notifikasi (Kode: ${response.statusCode})';
@@ -69,6 +68,30 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         _errorMessage = 'Terjadi kesalahan koneksi: $e';
         _isLoading = false;
       });
+    }
+  }
+
+  /// ================= TANDAI SUDAH DIBACA KE BACKEND =================
+  Future<void> _markNotificationsAsRead() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+
+      if (token == null) return;
+
+      // Panggil endpoint Laravel untuk mengubah is_read menjadi true di database
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/notifications/read-all'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      // Simpan juga status lokal jika diperlukan
+      await prefs.setBool('has_unread_notifications', false);
+    } catch (_) {
+      // Abaikan jika gagal agar tidak mengganggu UI
     }
   }
 
@@ -129,10 +152,15 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                         itemBuilder: (context, index) {
                           final notif = _notifications[index];
                           final type = notif['type'];
+                          
+                          // Cek apakah item ini belum dibaca (berdasarkan is_read dari server)
+                          final bool isUnread = notif['is_read'] == false;
 
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             elevation: 2,
+                            // Berikan sedikit perbedaan warna background jika belum dibaca
+                            color: isUnread ? Colors.blue.shade50 : Colors.white,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
@@ -146,8 +174,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                               ),
                               title: Text(
                                 notif['title'] ?? 'Informasi',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
+                                style: TextStyle(
+                                  fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
                                   fontSize: 14,
                                 ),
                               ),

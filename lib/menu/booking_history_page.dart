@@ -16,10 +16,20 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   List<dynamic> _bookings = [];
   bool _isLoading = true;
   String? _errorMessage;
+  String? _currentUserRole;
 
   @override
   void initState() {
     super.initState();
+    _loadUserRoleAndBookings();
+  }
+
+  Future<void> _loadUserRoleAndBookings() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Mengambil role dari key 'role' yang disimpan saat proses login
+    setState(() {
+      _currentUserRole = prefs.getString('role') ?? 'Penyewa'; 
+    });
     _fetchBookings();
   }
 
@@ -100,36 +110,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
-  // Simulasi Pembayaran QRIS (Mengubah payment_status menjadi paid)
+  // Simulasi Pembayaran QRIS (Untuk Penyewa)
   Future<void> _simulateQrisPayment(int bookingId) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      await http.patch(
-        Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/status'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'payment_status': 'paid'}),
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Simulasi Pembayaran QRIS Berhasil! Status: Lunas.')),
-      );
-      _fetchBookings();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pembayaran QRIS berhasil disimulasikan.')),
-      );
-      _fetchBookings();
-    }
-  }
-
-  // Fungsi Konfirmasi Pembayaran COD (Tunai) menjadi LUNAS
-  Future<void> _simulateCodPayment(int bookingId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('access_token');
@@ -146,57 +128,86 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pembayaran Tunai (COD) dikonfirmasi LUNAS!')),
+          const SnackBar(content: Text('Pembayaran QRIS Berhasil Dikonfirmasi! Status: Lunas.')),
         );
-        _fetchBookings();
       } else {
         final decoded = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(decoded['message'] ?? 'Gagal memperbarui status pembayaran')),
         );
       }
+      _fetchBookings();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
+      _fetchBookings();
     }
   }
 
-  // Dialog QRIS Statis
+  // Konfirmasi Pembayaran Tunai/COD LUNAS (Khusus Driver / Perental)
+  Future<void> _confirmCodPayment(int bookingId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/status'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'payment_status': 'paid'}),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pembayaran Tunai (COD) berhasil dikonfirmasi LUNAS!')),
+        );
+      } else {
+        final decoded = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(decoded['message'] ?? 'Gagal mengkonfirmasi pembayaran')),
+        );
+      }
+      _fetchBookings();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+      _fetchBookings();
+    }
+  }
+
   void _showQrisDialog(BuildContext context, dynamic booking) {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Pembayaran QRIS Statis'),
+          title: const Text('Pembayaran QRIS'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Silakan scan QR Code di bawah ini melalui aplikasi M-Banking atau E-Wallet Anda:',
-                  textAlign: TextAlign.center, style: TextStyle(fontSize: 13)),
+              const Text('Silakan scan QR Code di bawah ini:', textAlign: TextAlign.center),
               const SizedBox(height: 16),
               Container(
-                height: 200,
-                width: 200,
+                height: 180,
+                width: 180,
                 decoration: BoxDecoration(
                   color: Colors.grey.shade200,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade400),
                 ),
                 child: const Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.qr_code_2, size: 100, color: Colors.blue),
-                    SizedBox(height: 8),
-                    Text('QRIS RENTAL MOBIL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    Icon(Icons.qr_code_2, size: 80, color: Colors.blue),
+                    Text('QRIS RENTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                'Total: Rp ${booking['total_price']}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
-              ),
+              const SizedBox(height: 12),
+              Text('Total: Rp ${booking['total_price']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
             ],
           ),
           actions: [
@@ -258,6 +269,12 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         final paymentMethod = booking['payment_method'] ?? 'cod';
                         final bool withDriver = booking['with_driver'] == 1 || booking['with_driver'] == true;
 
+                        // Pengecekan role secara case-insensitive agar lebih fleksibel
+                        final String role = (_currentUserRole ?? '').toLowerCase();
+                        bool isStaffOrDriver = role.contains('driver') || 
+                                               role.contains('perental') || 
+                                               role.contains('super admin');
+
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           elevation: 2,
@@ -307,12 +324,9 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const Text(
-                                      'Metode Pembayaran:', 
-                                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                                    ),
+                                    const Text('Metode Pembayaran:', style: TextStyle(color: Colors.grey, fontSize: 12)),
                                     Text(
-                                      paymentMethod == 'qris' ? 'QRIS (Online)' : 'Bayar di Tempat (COD)',
+                                      paymentMethod == 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)',
                                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Colors.black87),
                                     ),
                                   ],
@@ -321,18 +335,13 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    const Text(
-                                      'Status Pembayaran:', 
-                                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                                    ),
+                                    const Text('Status Pembayaran:', style: TextStyle(color: Colors.grey, fontSize: 12)),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: paymentStatus == 'paid' ? Colors.green.shade50 : Colors.orange.shade50,
                                         borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(
-                                          color: paymentStatus == 'paid' ? Colors.green : Colors.orange,
-                                        ),
+                                        border: Border.all(color: paymentStatus == 'paid' ? Colors.green : Colors.orange),
                                       ),
                                       child: Text(
                                         paymentStatus == 'paid' ? 'LUNAS (PAID)' : 'BELUM BAYAR (UNPAID)',
@@ -346,44 +355,33 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                   ],
                                 ),
                                 const SizedBox(height: 6),
-                                Text(
-                                  'Total Biaya: Rp ${booking['total_price']}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 15),
-                                ),
+                                Text('Total Biaya: Rp ${booking['total_price']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 15)),
                                 const Divider(height: 20),
+                                
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    // Tombol Aksi Pembayaran QRIS jika belum bayar & metode qris
-                                    if (paymentStatus != 'paid' && paymentMethod == 'qris' && status != 'cancelled')
+                                    // 1. Jika Penyewa dan metode QRIS (Belum Lunas) -> Muncul tombol Bayar QRIS
+                                    if (!isStaffOrDriver && paymentStatus != 'paid' && paymentMethod == 'qris' && status != 'cancelled')
                                       ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.indigo,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                          minimumSize: Size.zero,
-                                        ),
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
                                         onPressed: () => _showQrisDialog(context, booking),
                                         icon: const Icon(Icons.qr_code, size: 16),
                                         label: const Text('Bayar via QRIS', style: TextStyle(fontSize: 12)),
-                                      )
-                                    // Tombol Konfirmasi Tunai Lunas jika metode COD dan belum bayar
-                                    else if (paymentStatus != 'paid' && paymentMethod == 'cod' && status != 'cancelled')
+                                      ),
+
+                                    // 2. Jika Driver/Perental dan metode COD (Belum Lunas) -> Muncul tombol Konfirmasi Tunai Lunas
+                                    if (isStaffOrDriver && paymentStatus != 'paid' && paymentMethod == 'cod' && status != 'cancelled')
                                       ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.green.shade700,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                          minimumSize: Size.zero,
-                                        ),
-                                        onPressed: () => _simulateCodPayment(booking['id']),
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
+                                        onPressed: () => _confirmCodPayment(booking['id']),
                                         icon: const Icon(Icons.money, size: 16),
                                         label: const Text('Konfirmasi Tunai Lunas', style: TextStyle(fontSize: 12)),
                                       ),
-                                    
+
                                     const Spacer(),
 
-                                    // Tombol Batalkan jika status masih pending
+                                    // Tombol Batalkan (hanya untuk status pending)
                                     if (status == 'pending')
                                       OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(foregroundColor: Colors.red, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),

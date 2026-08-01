@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/notifikasi.dart';
 
 class Navbar extends StatefulWidget implements PreferredSizeWidget {
   final String title;
-  final ValueChanged<String>? onSearchChanged; // Callback untuk menangkap teks pencarian
+  final ValueChanged<String>? onSearchChanged;
 
   const Navbar({
     super.key, 
@@ -24,7 +26,7 @@ class _NavbarState extends State<Navbar> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   
-  bool _hasNewNotifications = true; 
+  bool _hasNewNotifications = false;
 
   @override
   void initState() {
@@ -32,13 +34,36 @@ class _NavbarState extends State<Navbar> {
     _checkNotificationStatus();
   }
 
-  // Cek status apakah notifikasi sudah dibaca dari SharedPreferences
+  /// ================= CEK STATUS NOTIFIKASI DARI BACKEND =================
   Future<void> _checkNotificationStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      // Jika diset false oleh NotifikasiPage, maka titik merah hilang
-      _hasNewNotifications = prefs.getBool('has_unread_notifications') ?? true;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? token = prefs.getString('access_token');
+
+      if (token == null) return;
+
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/notifications'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        final List notifications = decoded['data'] ?? [];
+
+        // 🟢 Diperbaiki: Cek apakah ada notifikasi yang 'is_read'-nya bernilai false
+        bool hasUnread = notifications.any((notif) => notif['is_read'] == false);
+
+        setState(() {
+          _hasNewNotifications = hasUnread;
+        });
+      }
+    } catch (_) {
+      // Abaikan jika terjadi kendala koneksi
+    }
   }
 
   @override
@@ -80,7 +105,6 @@ class _NavbarState extends State<Navbar> {
       centerTitle: true,
       backgroundColor: Colors.blue,
       actions: [
-        // Tombol Toggle Search
         IconButton(
           icon: Icon(_isSearching ? Icons.close : Icons.search),
           onPressed: () {
@@ -95,7 +119,6 @@ class _NavbarState extends State<Navbar> {
             });
           },
         ),
-        // Tombol Notifikasi dengan Indikator Titik Merah Dinamis
         if (!_isSearching)
           Stack(
             alignment: Alignment.center,
@@ -103,6 +126,7 @@ class _NavbarState extends State<Navbar> {
               IconButton(
                 icon: const Icon(Icons.notifications),
                 onPressed: () async {
+                  // Buka halaman notifikasi
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -110,6 +134,7 @@ class _NavbarState extends State<Navbar> {
                     ),
                   );
                   // Segarkan status titik merah setelah kembali dari halaman notifikasi
+                  // (Karena NotifikasiPage sudah mengubah is_read menjadi true di server)
                   _checkNotificationStatus();
                 },
               ),

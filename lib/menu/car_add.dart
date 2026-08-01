@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -5,9 +6,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/menu/profil.dart'; 
 
 class CarAddPage extends StatefulWidget {
-  final Map<String, dynamic>? carData; // 👈 Jika ada data, berarti mode Edit
+  final Map<String, dynamic>? carData; // Jika ada data, berarti mode Edit
 
   const CarAddPage({super.key, this.carData});
 
@@ -25,7 +27,7 @@ class _CarAddPageState extends State<CarAddPage> {
   final TextEditingController _seatsController = TextEditingController();
   final TextEditingController _yearController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
-  final TextEditingController _driverPriceController = TextEditingController(); // 👈 Controller Tarif Driver
+  final TextEditingController _driverPriceController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _fuelSpecController = TextEditingController();
 
@@ -57,7 +59,7 @@ class _CarAddPageState extends State<CarAddPage> {
       _seatsController.text = car['seats']?.toString() ?? '';
       _yearController.text = car['year']?.toString() ?? '';
       _priceController.text = car['price_per_day']?.toString() ?? '';
-      _driverPriceController.text = car['driver_price_per_day']?.toString() ?? ''; // 👈 Load data tarif driver saat edit
+      _driverPriceController.text = car['driver_price_per_day']?.toString() ?? '';
       _descController.text = car['description'] ?? '';
       _fuelSpecController.text = car['fuel_spec'] ?? '';
 
@@ -142,7 +144,7 @@ class _CarAddPageState extends State<CarAddPage> {
       request.fields['seats'] = _seatsController.text.trim();
       request.fields['year'] = _yearController.text.trim();
       request.fields['price_per_day'] = _priceController.text.trim();
-      request.fields['driver_price_per_day'] = _driverPriceController.text.trim(); // 👈 Kirim data tarif driver ke API
+      request.fields['driver_price_per_day'] = _driverPriceController.text.trim();
       request.fields['description'] = _descController.text.trim();
       request.fields['status'] = _status;
 
@@ -163,11 +165,40 @@ class _CarAddPageState extends State<CarAddPage> {
           Colors.green,
         );
         Navigator.pop(context, true); 
+      } else if (response.statusCode == 403) {
+        // Tangkap pesan dari backend jika ada
+        String message = 'Lengkapi Data Personal (No. HP & KTP) terlebih dahulu.';
+        try {
+          final body = jsonDecode(response.body);
+          if (body['message'] != null) {
+            message = body['message'];
+          }
+        } catch (_) {}
+
+        _showSnackBar(message, Colors.orange);
+
+        // 🚀 Langsung arahkan ke Halaman Profil / Menu Pengisian Data
+        // Ganti '/profil' dengan rute yang sesuai di aplikasi Anda atau gunakan MaterialPageRoute
+        if (mounted) {
+          // Opsi A Menggunakan Named Route:
+          // Navigator.pushNamed(context, '/profil');
+          
+          // Opsi B Langsung Panggil Widget Halaman Profil:
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const ProfilPage()),
+          );
+        }
       } else {
-        _showSnackBar(
-          'Gagal menyimpan data. Periksa kembali inputan.',
-          Colors.red,
-        );
+        String errorMessage = 'Gagal menyimpan data. Periksa kembali inputan.';
+        try {
+          final body = jsonDecode(response.body);
+          if (body['message'] != null) {
+            errorMessage = body['message'];
+          }
+        } catch (_) {}
+
+        _showSnackBar(errorMessage, Colors.red);
       }
     } catch (e) {
       _showSnackBar('Terjadi kesalahan koneksi: $e', Colors.red);
@@ -192,7 +223,7 @@ class _CarAddPageState extends State<CarAddPage> {
     _seatsController.dispose();
     _yearController.dispose();
     _priceController.dispose();
-    _driverPriceController.dispose(); // 👈 Dispose controller driver
+    _driverPriceController.dispose();
     _descController.dispose();
     _fuelSpecController.dispose();
     super.dispose();
@@ -354,8 +385,6 @@ class _CarAddPageState extends State<CarAddPage> {
                     value!.isEmpty ? 'Harga sewa wajib diisi' : null,
               ),
               const SizedBox(height: 12),
-
-              // 👇 Input Tarif Driver Dinamis (Bebas diisi perental, tidak hardcode)
               TextFormField(
                 controller: _driverPriceController,
                 keyboardType: TextInputType.number,
@@ -365,7 +394,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 ),
               ),
               const SizedBox(height: 12),
-
               DropdownButtonFormField<String>(
                 value: _status,
                 decoration: const InputDecoration(
