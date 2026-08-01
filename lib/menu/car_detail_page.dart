@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+// 👇 Diaktifkan kembali import form booking
+import 'package:rentalcar/menu/booking_form_page.dart'; 
 
 class CarDetailPage extends StatefulWidget {
   final int carId;
@@ -98,15 +100,16 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 👇 Ambil data user/pemilik dari relasi backend
     final ownerData = _car?['user'] ?? _car?['owner'];
     final ownerName = ownerData != null ? (ownerData['name'] ?? 'Tidak diketahui') : 'Administrator / Perental';
     final ownerEmail = ownerData != null ? (ownerData['email'] ?? '-') : '';
 
-    // 👇 Ambil data dari tabel personal_data melalui relasi user
     final personalData = ownerData != null ? ownerData['personal_data'] : null;
     final ownerPhone = personalData != null ? (personalData['phone'] ?? '-') : '-';
     final ownerAddress = personalData != null ? (personalData['address'] ?? '-') : '-';
+
+    final status = _car?['status'] ?? '';
+    final driverPrice = _car?['driver_price_per_day'] ?? 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -130,7 +133,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Gambar Mobil
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: _car!['image'] != null && _car!['image'].toString().isNotEmpty
@@ -145,8 +147,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                                 : _buildPlaceholderImage(),
                           ),
                           const SizedBox(height: 16),
-                          
-                          // Brand & Status
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -161,31 +161,27 @@ class _CarDetailPageState extends State<CarDetailPage> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: _getStatusColor(_car!['status'] ?? '').withOpacity(0.1),
+                                  color: _getStatusColor(status).withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: _getStatusColor(_car!['status'] ?? '')),
+                                  border: Border.all(color: _getStatusColor(status)),
                                 ),
                                 child: Text(
-                                  (_car!['status'] ?? '').toUpperCase(),
+                                  status.toUpperCase(),
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: _getStatusColor(_car!['status'] ?? ''),
+                                    color: _getStatusColor(status),
                                   ),
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 6),
-
-                          // Nama Mobil
                           Text(
                             _car!['name'] ?? 'Tanpa Nama',
                             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 12),
-
-                          // Harga Sewa
                           Text(
                             'Rp ${_car!['price_per_day']} / hari',
                             style: const TextStyle(
@@ -194,9 +190,17 @@ class _CarDetailPageState extends State<CarDetailPage> {
                               color: Colors.blue,
                             ),
                           ),
+                          const SizedBox(height: 4),
+                          // 👇 Tampilkan informasi tarif driver dinamis
+                          Text(
+                            'Tarif Jasa Driver: Rp $driverPrice / hari',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.indigo,
+                            ),
+                          ),
                           const Divider(height: 24),
-
-                          // Informasi Pemilik / Perental Mobil
                           const Text(
                             'Informasi Pemilik / Perental',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -208,8 +212,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                           _buildInfoRow(Icons.phone, 'Nomor HP', ownerPhone),
                           _buildInfoRow(Icons.location_on, 'Alamat', ownerAddress),
                           const Divider(height: 24),
-
-                          // Informasi Spesifikasi
                           const Text(
                             'Spesifikasi Kendaraan',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -221,7 +223,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             _buildInfoRow(Icons.local_gas_station, 'Spesifikasi BBM', _car!['fuel_spec']),
                           _buildInfoRow(Icons.airline_seat_recline_normal, 'Kapasitas Kursi', '${_car!['seats']} Kursi'),
                           _buildInfoRow(Icons.calendar_today, 'Tahun Pembuatan', '${_car!['year']}'),
-
                           const SizedBox(height: 16),
                           const Text(
                             'Deskripsi',
@@ -232,9 +233,38 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             _car!['description'] ?? 'Tidak ada deskripsi tambahan.',
                             style: const TextStyle(color: Colors.black87, height: 1.4),
                           ),
+                          const SizedBox(height: 30),
                         ],
                       ),
                     ),
+      bottomNavigationBar: _isLoading || _car == null
+          ? null
+          : Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.white,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: status == 'tersedia' ? Colors.blue : Colors.grey,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: status == 'tersedia'
+                    ? () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BookingFormPage(car: _car!),
+                          ),
+                        );
+                      }
+                    : null,
+                child: Text(
+                  status == 'tersedia' ? 'Sewa Mobil Ini' : 'Mobil Sedang Tidak Tersedia',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
     );
   }
 

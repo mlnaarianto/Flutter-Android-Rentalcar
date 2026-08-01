@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rentalcar/menu/rentals_booking_page.dart'; // 👈 Import halaman manajemen pesanan & driver
 
 class Sidebar extends StatefulWidget {
   final String userName;
@@ -51,13 +52,13 @@ class _SidebarState extends State<Sidebar> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                // 👇 Avatar otomatis mendeteksi foto profil dari SharedPreferences atau fallback ke Icon/Asset
+                // Avatar otomatis mendeteksi foto profil dari SharedPreferences atau fallback ke Asset
                 CircleAvatar(
                   radius: 28,
                   backgroundColor: Colors.white,
                   backgroundImage: _avatarUrl != null && _avatarUrl!.isNotEmpty
                       ? NetworkImage(_avatarUrl!) as ImageProvider
-                      : const AssetImage("assets/anya.jpg"), // Sesuaikan asset default Anda
+                      : const AssetImage("assets/anya.jpg"),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -99,11 +100,38 @@ class _SidebarState extends State<Sidebar> {
             },
           ),
           
+          // 👇 Menu Khusus Perental / Super Admin untuk Kelola Pesanan & Driver
+          if (rolesList.contains('Perental') || rolesList.contains('Super Admin')) ...[
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Text(
+                'MANAJEMEN RENTAL',
+                style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.assignment_turned_in, color: Colors.blue),
+              title: const Text('Kelola Pesanan & Driver'),
+              onTap: () {
+                Navigator.pop(context); // Tutup drawer sidebar
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RentalsBookingPage()),
+                );
+              },
+            ),
+          ],
+
+          // 👇 Menu Khusus Super Admin
           if (rolesList.contains('Super Admin')) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Text('ADMINISTRATOR', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+              child: Text(
+                'ADMINISTRATOR',
+                style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.admin_panel_settings, color: Colors.red),

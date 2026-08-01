@@ -5,9 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/pages/login.dart';
 import 'package:rentalcar/menu/profil.dart';
-import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/menu/car.dart'; 
+import 'package:rentalcar/menu/booking_history_page.dart'; // 👈 Import Halaman Riwayat Booking
 import 'package:rentalcar/config/api_config.dart';
 
 class Bottom extends StatefulWidget {
@@ -168,16 +168,15 @@ class _BottomState extends State<Bottom> {
           );
         } else if (index == 1) {
           // Navigasi ke Halaman Mobil
-          // Mengirim role ke halaman CarPage jika diperlukan untuk pembatasan tombol tambah
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const CarPage()),
           );
         } else if (index == 2) {
-          // Chat
-          Navigator.push(
+          // 👈 Diganti ke Halaman Riwayat Pemesanan (Booking History)
+          Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const ChatPage()),
+            MaterialPageRoute(builder: (_) => const BookingHistoryPage()),
           );
         } else if (index == 3) {
           // Profile
@@ -196,12 +195,11 @@ class _BottomState extends State<Bottom> {
         ),
         BottomNavigationBarItem(
           icon: const Icon(Icons.car_rental),
-          // Label bisa dikustomisasi jika ingin memperlihatkan konteks role
           label: _userRole == 'Penyewa' ? 'Cari Mobil' : 'Mobil',
         ),
         const BottomNavigationBarItem(
-          icon: Icon(Icons.chat_bubble_outline),
-          label: 'Chat',
+          icon: Icon(Icons.history), // 👈 Ikon Riwayat Pesanan
+          label: 'Riwayat',
         ),
         BottomNavigationBarItem(
           icon: GestureDetector(

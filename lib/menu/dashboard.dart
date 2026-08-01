@@ -1,55 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/layouts/app.dart';
+import 'package:rentalcar/menu/car_detail_page.dart';
 
-// Halaman Detail Mobil (Opsional di satu file yang sama atau bisa dipisah)
-class CarDetailPage extends StatelessWidget {
-  final String carName;
-  final String category;
-  final String price;
-
-  const CarDetailPage({
-    super.key,
-    required this.carName,
-    required this.category,
-    required this.price,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Membuat slug sederhana dari nama mobil
-    final String slug = carName.toLowerCase().replaceAll(' ', '-');
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(carName),
-        backgroundColor: Colors.blue,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              carName,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Slug: /cars/$slug',
-              style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
-            ),
-            const SizedBox(height: 16),
-            Text('Kategori: $category', style: const TextStyle(fontSize: 16)),
-            const SizedBox(height: 8),
-            Text('Harga: $price', style: const TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Halaman Utama Dashboard
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
 
@@ -58,26 +15,65 @@ class Dashboard extends StatefulWidget {
 }
 
 class _DashboardState extends State<Dashboard> {
-  // Dummy Data daftar mobil rental
-  final List<Map<String, String>> _allCars = [
-    {'name': 'Toyota Avanza', 'category': 'Family Car', 'price': 'Rp 350.000 / hari'},
-    {'name': 'Honda Brio', 'category': 'City Car', 'price': 'Rp 250.000 / hari'},
-    {'name': 'Mitsubishi Xpander', 'category': 'Family Car', 'price': 'Rp 400.000 / hari'},
-    {'name': 'Toyota Fortuner', 'category': 'SUV', 'price': 'Rp 900.000 / hari'},
-    {'name': 'Honda Civic', 'category': 'Sedan', 'price': 'Rp 1.200.000 / hari'},
-    {'name': 'Daihatsu Sigra', 'category': 'Family Car', 'price': 'Rp 300.000 / hari'},
-  ];
-
-  List<Map<String, String>> _filteredCars = [];
+  List<dynamic> _allCars = [];
+  List<dynamic> _filteredCars = [];
+  bool _isLoading = true;
+  String _userName = '';
+  String _userRole = '';
   String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _filteredCars = _allCars;
+    _loadUserData();
+    _fetchDashboardCars();
   }
 
-  // Fungsi untuk memfilter data berdasarkan input search dari Navbar
+  /// Mengambil data nama & role asli dari SharedPreferences (Session login)
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      // 👇 PERBAIKAN: Gunakan 'user_name' sesuai yang disimpan saat proses login
+      _userName = prefs.getString('user_name') ?? prefs.getString('email')?.split('@')[0] ?? 'Pengguna';
+      _userRole = prefs.getString('role') ?? 'Penyewa';
+    });
+  }
+
+  /// Mengambil data mobil dari API Laravel
+  Future<void> _fetchDashboardCars() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? token = prefs.getString('access_token');
+
+      if (token == null) return;
+
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/cars'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final decodedData = jsonDecode(response.body);
+        final listCars = decodedData['data'] ?? [];
+        setState(() {
+          _allCars = listCars;
+          _filteredCars = listCars;
+          _isLoading = false;
+        });
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  /// Fungsi untuk filter pencarian dari AppLayout / Navbar search
   void _filterCars(String query) {
     setState(() {
       _searchQuery = query;
@@ -85,13 +81,22 @@ class _DashboardState extends State<Dashboard> {
         _filteredCars = _allCars;
       } else {
         _filteredCars = _allCars.where((car) {
-          final carName = car['name']!.toLowerCase();
-          final category = car['category']!.toLowerCase();
+          final name = (car['name'] ?? '').toLowerCase();
+          final brand = (car['brand'] ?? '').toLowerCase();
           final input = query.toLowerCase();
-          return carName.contains(input) || category.contains(input);
+          return name.contains(input) || brand.contains(input);
         }).toList();
       }
     });
+  }
+
+  String _getImageUrl(String? imagePath) {
+    if (imagePath == null || imagePath.isEmpty) return '';
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return imagePath;
+    }
+    final serverRoot = ApiConfig.baseUrl.replaceAll('/api', '');
+    return imagePath.startsWith('/') ? '$serverRoot$imagePath' : '$serverRoot/storage/$imagePath';
   }
 
   @override
@@ -99,74 +104,178 @@ class _DashboardState extends State<Dashboard> {
     return AppLayout(
       title: 'Dashboard',
       currentIndex: 0,
-      onTap: (index) {
-        print('Bottom nav index: $index');
-      },
-      // Menghubungkan fungsi filter pencarian ke AppLayout/Navbar
+      onTap: (index) {},
       appBarSearchCallback: _filterCars,
-      content: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Indikator teks jika sedang mencari
-            if (_searchQuery.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: Text(
-                  'Hasil pencarian untuk: "$_searchQuery" (${_filteredCars.length} ditemukan)',
-                  style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
+      content: RefreshIndicator(
+        onRefresh: _fetchDashboardCars,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. Header Banner Selamat Datang dengan Nama Sesi Aktif
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Colors.blue, Colors.blueAccent],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Halo, $_userName! 👋',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _userRole == 'Perental'
+                          ? 'Kelola armada rental mobil Anda dengan mudah di sini.'
+                          : 'Temukan mobil impian untuk perjalanan nyaman Anda hari ini.',
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
+              const SizedBox(height: 20),
 
-            // Daftar List Mobil
-            Expanded(
-              child: _filteredCars.isEmpty
+              // 2. Label Bagian
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Daftar Mobil Tersedia',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '${_filteredCars.length} Unit',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Indikator teks pencarian aktif
+              if (_searchQuery.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12.0),
+                  child: Text(
+                    'Hasil pencarian untuk: "$_searchQuery"',
+                    style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey, fontSize: 13),
+                  ),
+                ),
+
+              // 3. List / Grid Konten Mobil
+              _isLoading
                   ? const Center(
-                      child: Text(
-                        'Mobil tidak ditemukan',
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      child: Padding(
+                        padding: EdgeInsets.all(40.0),
+                        child: CircularProgressIndicator(),
                       ),
                     )
-                  : ListView.builder(
-                      itemCount: _filteredCars.length,
-                      itemBuilder: (context, index) {
-                        final car = _filteredCars[index];
-                        return Card(
-                          elevation: 2,
-                          margin: const EdgeInsets.only(bottom: 12.0),
-                          child: ListTile(
-                            leading: const CircleAvatar(
-                              backgroundColor: Colors.blueAccent,
-                              child: Icon(Icons.directions_car, color: Colors.white),
-                            ),
-                            title: Text(
-                              car['name']!,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text('${car['category']} • ${car['price']}'),
-                            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                            onTap: () {
-                              // Navigasi ke Halaman Detail saat card diklik
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => CarDetailPage(
-                                    carName: car['name']!,
-                                    category: car['category']!,
-                                    price: car['price']!,
+                  : _filteredCars.isEmpty
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(40.0),
+                            child: Text('Tidak ada mobil yang ditemukan.', style: TextStyle(color: Colors.grey)),
+                          ),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _filteredCars.length,
+                          itemBuilder: (context, index) {
+                            final car = _filteredCars[index];
+                            final imageUrl = _getImageUrl(car['image']);
+
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => CarDetailPage(carId: car['id']),
+                                    ),
+                                  );
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Row(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: imageUrl.isNotEmpty
+                                            ? Image.network(
+                                                imageUrl,
+                                                width: 80,
+                                                height: 80,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) =>
+                                                    _buildPlaceholder(),
+                                              )
+                                            : _buildPlaceholder(),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              car['brand']?.toUpperCase() ?? '',
+                                              style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              car['name'] ?? 'Mobil Rental',
+                                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Rp ${car['price_per_day']} / hari',
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.blue,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                                    ],
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
+                              ),
+                            );
+                          },
+                        ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      width: 80,
+      height: 80,
+      color: Colors.grey.shade200,
+      child: const Icon(Icons.directions_car, color: Colors.grey),
     );
   }
 }

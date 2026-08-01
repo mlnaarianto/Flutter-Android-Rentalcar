@@ -12,6 +12,7 @@
         android:maxSdkVersion="32" />
 
     <application
+        android:enableOnBackInvokedCallback="true"
         android:label="rentalcar"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"

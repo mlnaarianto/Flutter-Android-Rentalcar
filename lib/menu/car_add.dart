@@ -25,14 +25,14 @@ class _CarAddPageState extends State<CarAddPage> {
   final TextEditingController _seatsController = TextEditingController();
   final TextEditingController _yearController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
+  final TextEditingController _driverPriceController = TextEditingController(); // 👈 Controller Tarif Driver
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _fuelSpecController = TextEditingController();
 
-  // Nilai Default Dropdown sesuai kodingan lama Anda
+  // Nilai Default Dropdown
   String _engineType = 'Bensin (Gasoline)';
   String _status = 'tersedia';
 
-  // Opsi Pilihan Dropdown Sesuai Backend Laravel
   final List<String> _engineTypes = [
     'Bensin (Gasoline)',
     'Diesel (Gasoil)',
@@ -50,7 +50,6 @@ class _CarAddPageState extends State<CarAddPage> {
   void initState() {
     super.initState();
     if (_isEditMode) {
-      // Mengisi form dengan data lama jika dalam mode Edit
       final car = widget.carData!;
       _nameController.text = car['name'] ?? '';
       _brandController.text = car['brand'] ?? '';
@@ -58,14 +57,13 @@ class _CarAddPageState extends State<CarAddPage> {
       _seatsController.text = car['seats']?.toString() ?? '';
       _yearController.text = car['year']?.toString() ?? '';
       _priceController.text = car['price_per_day']?.toString() ?? '';
+      _driverPriceController.text = car['driver_price_per_day']?.toString() ?? ''; // 👈 Load data tarif driver saat edit
       _descController.text = car['description'] ?? '';
       _fuelSpecController.text = car['fuel_spec'] ?? '';
 
-      // Pastikan engine_type yang dari database cocok dengan salah satu isi list [_engineTypes]
       if (_engineTypes.contains(car['engine_type'])) {
         _engineType = car['engine_type'];
       } else if (car['engine_type'] != null) {
-        // Fallback pencocokan fleksibel jika database menyimpan string pendek
         final matched = _engineTypes.firstWhere(
           (e) => e.toLowerCase().startsWith(car['engine_type'].toString().toLowerCase()),
           orElse: () => 'Bensin (Gasoline)',
@@ -80,19 +78,12 @@ class _CarAddPageState extends State<CarAddPage> {
     }
   }
 
-  // Helper untuk mendapatkan URL gambar dengan benar tanpa double /storage/
   String _getImageUrl(String? imagePath) {
     if (imagePath == null || imagePath.isEmpty) return '';
-    
-    // Jika dari backend sudah berupa URL lengkap (mengandung http:// atau https://), gunakan langsung
     if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
       return imagePath;
     }
-    
-    // Jika path relatif, gabungkan dengan domain server & /storage/
     final serverRoot = ApiConfig.baseUrl.replaceAll('/api', '');
-    
-    // Bersihkan slash ganda jika ada
     if (imagePath.startsWith('/')) {
       return '$serverRoot$imagePath';
     } else {
@@ -100,7 +91,6 @@ class _CarAddPageState extends State<CarAddPage> {
     }
   }
 
-  // Fungsi Memilih Gambar dari Galeri
   Future<void> _pickImage() async {
     final pickedFile = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -112,7 +102,6 @@ class _CarAddPageState extends State<CarAddPage> {
     }
   }
 
-  // Fungsi Kirim Data ke API Laravel (Tambah atau Edit)
   Future<void> _submitCar() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -130,7 +119,6 @@ class _CarAddPageState extends State<CarAddPage> {
         return;
       }
 
-      // Tentukan URL endpoint (Jika edit pakai ID, jika tambah langsung /cars)
       final String url = _isEditMode
           ? '${ApiConfig.baseUrl}/cars/${widget.carData!['id']}'
           : '${ApiConfig.baseUrl}/cars';
@@ -142,7 +130,6 @@ class _CarAddPageState extends State<CarAddPage> {
         'Authorization': 'Bearer $token',
       });
 
-      // Laravel memerlukan _method = PUT jika melakukan update dengan MultipartRequest
       if (_isEditMode) {
         request.fields['_method'] = 'PUT';
       }
@@ -155,10 +142,10 @@ class _CarAddPageState extends State<CarAddPage> {
       request.fields['seats'] = _seatsController.text.trim();
       request.fields['year'] = _yearController.text.trim();
       request.fields['price_per_day'] = _priceController.text.trim();
+      request.fields['driver_price_per_day'] = _driverPriceController.text.trim(); // 👈 Kirim data tarif driver ke API
       request.fields['description'] = _descController.text.trim();
       request.fields['status'] = _status;
 
-      // Lampirkan file gambar baru jika ada
       if (_imageFile != null) {
         request.files.add(
           await http.MultipartFile.fromPath('image', _imageFile!.path),
@@ -175,9 +162,8 @@ class _CarAddPageState extends State<CarAddPage> {
               : 'Mobil berhasil ditambahkan!',
           Colors.green,
         );
-        Navigator.pop(context, true); // Kembali dan refresh halaman sebelumnya
+        Navigator.pop(context, true); 
       } else {
-        print('Response error: ${response.body}');
         _showSnackBar(
           'Gagal menyimpan data. Periksa kembali inputan.',
           Colors.red,
@@ -206,6 +192,7 @@ class _CarAddPageState extends State<CarAddPage> {
     _seatsController.dispose();
     _yearController.dispose();
     _priceController.dispose();
+    _driverPriceController.dispose(); // 👈 Dispose controller driver
     _descController.dispose();
     _fuelSpecController.dispose();
     super.dispose();
@@ -226,7 +213,6 @@ class _CarAddPageState extends State<CarAddPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 1. Upload / Preview Gambar Mobil
               Center(
                 child: GestureDetector(
                   onTap: _pickImage,
@@ -251,8 +237,7 @@ class _CarAddPageState extends State<CarAddPage> {
                             )
                           : null,
                     ),
-                    child:
-                        (_imageFile == null &&
+                    child: (_imageFile == null &&
                             (_existingImageUrl == null ||
                                 _existingImageUrl!.isEmpty))
                         ? Column(
@@ -278,8 +263,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // 2. Nama Mobil
               TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(
@@ -290,8 +273,6 @@ class _CarAddPageState extends State<CarAddPage> {
                     value!.isEmpty ? 'Nama mobil wajib diisi' : null,
               ),
               const SizedBox(height: 12),
-
-              // 3. Brand / Merek
               TextFormField(
                 controller: _brandController,
                 decoration: const InputDecoration(
@@ -302,8 +283,6 @@ class _CarAddPageState extends State<CarAddPage> {
                     value!.isEmpty ? 'Merek wajib diisi' : null,
               ),
               const SizedBox(height: 12),
-
-              // 4. Plat Nomor
               TextFormField(
                 controller: _plateController,
                 decoration: const InputDecoration(
@@ -314,8 +293,6 @@ class _CarAddPageState extends State<CarAddPage> {
                     value!.isEmpty ? 'Plat nomor wajib diisi' : null,
               ),
               const SizedBox(height: 12),
-
-              // 5. Tipe Mesin (Dropdown)
               DropdownButtonFormField<String>(
                 value: _engineType,
                 decoration: const InputDecoration(
@@ -328,8 +305,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 onChanged: (value) => setState(() => _engineType = value!),
               ),
               const SizedBox(height: 12),
-
-              // 6. Spesifikasi Bahan Bakar
               TextFormField(
                 controller: _fuelSpecController,
                 decoration: const InputDecoration(
@@ -338,8 +313,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // 7. Kapasitas Kursi & Tahun Mobil
               Row(
                 children: [
                   Expanded(
@@ -370,8 +343,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 ],
               ),
               const SizedBox(height: 12),
-
-              // 8. Harga Sewa
               TextFormField(
                 controller: _priceController,
                 keyboardType: TextInputType.number,
@@ -384,7 +355,17 @@ class _CarAddPageState extends State<CarAddPage> {
               ),
               const SizedBox(height: 12),
 
-              // 9. Status Mobil
+              // 👇 Input Tarif Driver Dinamis (Bebas diisi perental, tidak hardcode)
+              TextFormField(
+                controller: _driverPriceController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Tarif Driver per Hari (Rp) - Opsional/0 jika lepas kunci',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+
               DropdownButtonFormField<String>(
                 value: _status,
                 decoration: const InputDecoration(
@@ -400,8 +381,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 onChanged: (value) => setState(() => _status = value!),
               ),
               const SizedBox(height: 12),
-
-              // 10. Deskripsi
               TextFormField(
                 controller: _descController,
                 maxLines: 3,
@@ -411,8 +390,6 @@ class _CarAddPageState extends State<CarAddPage> {
                 ),
               ),
               const SizedBox(height: 24),
-
-              // Tombol Simpan / Perbarui
               ElevatedButton(
                 onPressed: _isLoading ? null : _submitCar,
                 style: ElevatedButton.styleFrom(

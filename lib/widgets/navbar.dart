@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/notifikasi.dart';
 
 class Navbar extends StatefulWidget implements PreferredSizeWidget {
@@ -21,6 +23,23 @@ class Navbar extends StatefulWidget implements PreferredSizeWidget {
 class _NavbarState extends State<Navbar> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  
+  bool _hasNewNotifications = true; 
+
+  @override
+  void initState() {
+    super.initState();
+    _checkNotificationStatus();
+  }
+
+  // Cek status apakah notifikasi sudah dibaca dari SharedPreferences
+  Future<void> _checkNotificationStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      // Jika diset false oleh NotifikasiPage, maka titik merah hilang
+      _hasNewNotifications = prefs.getBool('has_unread_notifications') ?? true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,18 +95,40 @@ class _NavbarState extends State<Navbar> {
             });
           },
         ),
-        // Tombol Notifikasi (hanya muncul saat tidak sedang search agar rapi)
+        // Tombol Notifikasi dengan Indikator Titik Merah Dinamis
         if (!_isSearching)
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const NotifikasiPage(),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const NotifikasiPage(),
+                    ),
+                  );
+                  // Segarkan status titik merah setelah kembali dari halaman notifikasi
+                  _checkNotificationStatus();
+                },
+              ),
+              // Titik Indikator Merah
+              if (_hasNewNotifications)
+                Positioned(
+                  right: 11,
+                  top: 11,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.blue, width: 1.5),
+                    ),
+                  ),
                 ),
-              );
-            },
+            ],
           ),
       ],
     );
