@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/rentals_booking_page.dart';
 import 'package:rentalcar/menu/chat.dart';
+import 'package:rentalcar/menu/driver_bookings_page.dart'; // 👈 Impor halaman tugas driver yang sudah dibuat sebelumnya
 
 class Sidebar extends StatefulWidget {
   final String userName;
@@ -21,7 +22,7 @@ class Sidebar extends StatefulWidget {
 
 class _SidebarState extends State<Sidebar> {
   String? _avatarUrl;
-  String? _userId; // Tambahan untuk menyimpan ID user aktif
+  String? _userId;
 
   @override
   void initState() {
@@ -29,12 +30,10 @@ class _SidebarState extends State<Sidebar> {
     _loadUserData();
   }
 
-  // Mengambil avatar dan ID user tersimpan dari SharedPreferences
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _avatarUrl = prefs.getString('avatar_url');
-      // Ambil id user dari local storage, sesuaikan key-nya dengan aplikasi Anda (misal: 'user_id' atau 'id')
       _userId = prefs.getString('user_id') ?? '3';
     });
   }
@@ -45,9 +44,9 @@ class _SidebarState extends State<Sidebar> {
         .map((role) => role.toString())
         .toList();
 
-    // Membuat chatId unik berdasarkan email atau userId agar privat antara user & admin
     final String uniqueChatId =
         'room_user_${widget.userEmail.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+        
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
@@ -116,10 +115,10 @@ class _SidebarState extends State<Sidebar> {
             },
           ),
 
-          // Menu Chat (Terhubung privat ke Admin sesuai user yang login)
+          // Menu Chat Admin (CS)
           ListTile(
             leading: const Icon(Icons.chat, color: Colors.blue),
-            title: const Text('Chat'),
+            title: const Text('Chat Admin'),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
@@ -129,12 +128,49 @@ class _SidebarState extends State<Sidebar> {
                     chatId: uniqueChatId,
                     currentUserId: _userId ?? '3',
                     currentUserName: widget.userName,
+                    receiverName: "Admin Rental (CS)",
                   ),
                 ),
               );
             },
           ),
 
+          // 👇 MENU KHUSUS DRIVER
+          if (rolesList.contains('Driver')) ...[
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Text(
+                'MENU DRIVER',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.directions_car,
+                color: Colors.indigo,
+              ),
+              title: const Text('Tugas Penugasan'),
+              onTap: () {
+                Navigator.pop(context);
+                // Ganti `DriverBookingsPage` dengan nama kelas halaman driver yang Anda buat
+                
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DriverBookingsPage(),
+                  ),
+                );
+                
+              },
+            ),
+          ],
+
+          // Menu Manajemen Rental (Perental / Super Admin)
           if (rolesList.contains('Perental') ||
               rolesList.contains('Super Admin')) ...[
             const Divider(),
@@ -167,6 +203,7 @@ class _SidebarState extends State<Sidebar> {
             ),
           ],
 
+          // Menu Administrator (Super Admin)
           if (rolesList.contains('Super Admin')) ...[
             const Divider(),
             const Padding(

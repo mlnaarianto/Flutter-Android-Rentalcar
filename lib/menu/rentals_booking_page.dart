@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/menu/chat.dart';
 
 class RentalsBookingPage extends StatefulWidget {
   const RentalsBookingPage({super.key});
@@ -14,14 +15,26 @@ class RentalsBookingPage extends StatefulWidget {
 class _RentalsBookingPageState extends State<RentalsBookingPage> {
   List<dynamic> _bookings = [];
   bool _isLoading = true;
+  String? _currentUserId;
+  String? _currentUserName;
 
   @override
   void initState() {
     super.initState();
+    _loadLocalUserData();
     _fetchBookings();
   }
 
-  // 1. Ambil daftar booking (khusus perental/admin dari API backend)
+  // Ambil data user aktif (Perental) dari SharedPreferences
+  Future<void> _loadLocalUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _currentUserId = prefs.getString('user_id') ?? '3';
+      _currentUserName = prefs.getString('user_name') ?? 'Perental';
+    });
+  }
+
+  // 1. Ambil daftar booking khusus perental dari API backend
   Future<void> _fetchBookings() async {
     setState(() => _isLoading = true);
     try {
@@ -96,7 +109,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
           content: StatefulBuilder(
             builder: (context, setStateDialog) {
               return DropdownButtonFormField<int>(
-                isExpanded: true, // 👈 Mencegah overflow pada layout dropdown
+                isExpanded: true,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   labelText: 'Pilih Nama Driver',
@@ -106,7 +119,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                     value: driver['id'],
                     child: Text(
                       '${driver['name']} (${driver['email']})',
-                      overflow: TextOverflow.ellipsis, // 👈 Memotong teks panjang dengan aman
+                      overflow: TextOverflow.ellipsis,
                     ),
                   );
                 }).toList(),
@@ -165,7 +178,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Driver berhasil ditugaskan!')),
         );
-        _fetchBookings(); // Refresh data
+        _fetchBookings();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(decoded['message'] ?? 'Gagal menugaskan driver')),
@@ -200,7 +213,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Status booking berhasil diperbarui!')),
         );
-        _fetchBookings(); // Refresh data
+        _fetchBookings();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(decoded['message'] ?? 'Gagal memperbarui status')),
@@ -211,6 +224,61 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         SnackBar(content: Text('Error: $e')),
       );
     }
+  }
+
+  // Navigasi ke Halaman Chat Perental $\leftrightarrow$ Penyewa
+  void _openChatWithRenter(Map<String, dynamic> renter) {
+    final String renterId = renter['id']?.toString() ?? '';
+    final String renterName = renter['name'] ?? 'Penyewa';
+
+    if (renterId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ID Penyewa tidak valid.')),
+      );
+      return;
+    }
+    
+    final String uniqueChatId = 'room_rental_${_currentUserId}_user_$renterId';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatPage(
+          chatId: uniqueChatId,
+          currentUserId: _currentUserId ?? '3',
+          currentUserName: _currentUserName ?? 'Perental',
+          receiverName: "Penyewa: $renterName",
+        ),
+      ),
+    );
+  }
+
+  // Navigasi ke Halaman Chat Perental $\leftrightarrow$ Driver
+  void _openChatWithDriver(Map<String, dynamic> driver) {
+    final String driverId = driver['id']?.toString() ?? '';
+    final String driverName = driver['name'] ?? 'Driver';
+
+    if (driverId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ID Driver tidak valid.')),
+      );
+      return;
+    }
+
+    // Format chatId perental dengan driver (Harus sinkron dengan sisi DriverBookingsPage: room_rental_${ownerId}_driver_${driverId})
+    final String uniqueChatId = 'room_rental_${_currentUserId}_driver_$driverId';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatPage(
+          chatId: uniqueChatId,
+          currentUserId: _currentUserId ?? '3',
+          currentUserName: _currentUserName ?? 'Perental',
+          receiverName: "Driver: $driverName",
+        ),
+      ),
+    );
   }
 
   @override
@@ -249,7 +317,21 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Mobil: ${car['name'] ?? '-'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text('Mobil: ${car['name'] ?? '-'}', 
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                  ),
+                                  // Tombol Shortcut Chat dengan Penyewa
+                                  IconButton(
+                                    icon: const Icon(Icons.chat_bubble_outline, color: Colors.blue),
+                                    tooltip: 'Chat Penyewa',
+                                    onPressed: () => _openChatWithRenter(renter),
+                                  ),
+                                ],
+                              ),
                               const SizedBox(height: 4),
                               Text('Penyewa: ${renter['name'] ?? '-'}'),
                               Text('Tanggal: ${booking['start_date']} s/d ${booking['end_date']} (${booking['total_days']} Hari)'),
@@ -346,30 +428,50 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(color: Colors.grey.shade200),
                                   ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  child: Column(
                                     children: [
-                                      Expanded(
-                                        child: Text(
-                                          driver != null 
-                                              ? 'Driver: ${driver['name']}' 
-                                              : 'Driver: Belum Ditugaskan',
-                                          style: TextStyle(
-                                            color: driver != null ? Colors.green.shade700 : Colors.red.shade700,
-                                            fontWeight: FontWeight.w600,
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              driver != null 
+                                                  ? 'Driver: ${driver['name']}' 
+                                                  : 'Driver: Belum Ditugaskan',
+                                              style: TextStyle(
+                                                color: driver != null ? Colors.green.shade700 : Colors.red.shade700,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.orange,
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                              minimumSize: Size.zero,
+                                            ),
+                                            onPressed: () => _showAssignDriverDialog(booking['id']),
+                                            child: Text(driver != null ? 'Ganti Driver' : 'Tugaskan'),
+                                          ),
+                                        ],
+                                      ),
+                                      if (driver != null) ...[
+                                        const SizedBox(height: 6),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.teal,
+                                              side: const BorderSide(color: Colors.teal),
+                                              padding: const EdgeInsets.symmetric(vertical: 4),
+                                            ),
+                                            icon: const Icon(Icons.chat, size: 16),
+                                            label: const Text('Chat Driver', style: TextStyle(fontSize: 12)),
+                                            onPressed: () => _openChatWithDriver(driver),
                                           ),
                                         ),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.orange,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                          minimumSize: Size.zero,
-                                        ),
-                                        onPressed: () => _showAssignDriverDialog(booking['id']),
-                                        child: Text(driver != null ? 'Ganti Driver' : 'Tugaskan'),
-                                      ),
+                                      ],
                                     ],
                                   ),
                                 ),

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/widgets/bottom.dart';
+import 'package:rentalcar/menu/chat.dart';
 
 class BookingHistoryPage extends StatefulWidget {
   const BookingHistoryPage({super.key});
@@ -17,6 +18,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   bool _isLoading = true;
   String? _errorMessage;
   String? _currentUserRole;
+  String? _currentUserId;
+  String? _currentUserName;
 
   @override
   void initState() {
@@ -26,9 +29,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
   Future<void> _loadUserRoleAndBookings() async {
     final prefs = await SharedPreferences.getInstance();
-    // Mengambil role dari key 'role' yang disimpan saat proses login
     setState(() {
       _currentUserRole = prefs.getString('role') ?? 'Penyewa'; 
+      _currentUserId = prefs.getString('user_id') ?? '3';
+      _currentUserName = prefs.getString('user_name') ?? 'Penyewa';
     });
     _fetchBookings();
   }
@@ -180,6 +184,50 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
+  // Fungsi navigasi membuka chat dari history dengan pencarian ID perental yang aman
+  void _openChatWithOwner(dynamic carData) {
+    if (carData == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informasi kendaraan tidak tersedia.')),
+      );
+      return;
+    }
+
+    // Ambil data pemilik dari beberapa kemungkinan key struktur JSON API
+    final ownerMap = carData['user'] ?? carData['owner'];
+    
+    // Cari ID pemilik dengan prioritas: ownerMap['id'] -> carData['user_id'] -> fallback ke '2' (atau ID default perental)
+    final String ownerId = ownerMap != null && ownerMap['id'] != null 
+        ? ownerMap['id'].toString() 
+        : (carData['user_id']?.toString() ?? '2'); 
+
+    final String ownerName = ownerMap != null && ownerMap['name'] != null 
+        ? ownerMap['name'].toString() 
+        : 'Perental';
+
+    if (ownerId.isEmpty || ownerId == 'null') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ID Perental tidak valid.')),
+      );
+      return;
+    }
+
+    // Format chatId konsisten: room_rental_[ID_Perental]_user_[ID_Penyewa]
+    final String uniqueChatId = 'room_rental_${ownerId}_user_${_currentUserId ?? '3'}';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatPage(
+          chatId: uniqueChatId,
+          currentUserId: _currentUserId ?? '3',
+          currentUserName: _currentUserName ?? 'Penyewa',
+          receiverName: "Perental: $ownerName",
+        ),
+      ),
+    );
+  }
+
   void _showQrisDialog(BuildContext context, dynamic booking) {
     showDialog(
       context: context,
@@ -269,7 +317,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         final paymentMethod = booking['payment_method'] ?? 'cod';
                         final bool withDriver = booking['with_driver'] == 1 || booking['with_driver'] == true;
 
-                        // Pengecekan role secara case-insensitive agar lebih fleksibel
                         final String role = (_currentUserRole ?? '').toLowerCase();
                         bool isStaffOrDriver = role.contains('driver') || 
                                                role.contains('perental') || 
@@ -358,8 +405,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                 Text('Total Biaya: Rp ${booking['total_price']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 15)),
                                 const Divider(height: 20),
                                 
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                // Aksi Tombol (Pembayaran, Chat, dan Batal)
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  alignment: WrapAlignment.spaceBetween,
                                   children: [
                                     // 1. Jika Penyewa dan metode QRIS (Belum Lunas) -> Muncul tombol Bayar QRIS
                                     if (!isStaffOrDriver && paymentStatus != 'paid' && paymentMethod == 'qris' && status != 'cancelled')
@@ -379,9 +429,20 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                         label: const Text('Konfirmasi Tunai Lunas', style: TextStyle(fontSize: 12)),
                                       ),
 
-                                    const Spacer(),
+                                    // 3. Tombol Chat Perental
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.teal,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        minimumSize: Size.zero,
+                                      ),
+                                      icon: const Icon(Icons.chat, size: 16),
+                                      label: const Text('Chat Perental', style: TextStyle(fontSize: 12)),
+                                      onPressed: () => _openChatWithOwner(car),
+                                    ),
 
-                                    // Tombol Batalkan (hanya untuk status pending)
+                                    // 4. Tombol Batalkan (hanya untuk status pending)
                                     if (status == 'pending')
                                       OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(foregroundColor: Colors.red, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),

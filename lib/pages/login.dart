@@ -89,6 +89,11 @@ class _LoginPageState extends State<LoginPage> {
         await prefs.setString('access_token', sanctumToken);
 
         if (userData != null) {
+          // 👇 SIMPAN USER ID AGAR CHAT DAN RIWAYAT SINKRON
+          if (userData['id'] != null) {
+            await prefs.setString('user_id', userData['id'].toString());
+          }
+
           await prefs.setString('user_name', userData['name'] ?? '');
           await prefs.setString('user_email', userData['email'] ?? '');
           
@@ -96,22 +101,20 @@ class _LoginPageState extends State<LoginPage> {
             await prefs.setString('avatar_url', userData['avatar']);
           }
 
-          // 👇 SIMPAN ROLE SPATIE DENGAN BENAR
+          // Simpan role Spatie dengan benar
           if (userData['roles'] != null) {
             List<dynamic> rawRoles = userData['roles'];
             List<String> rolesList = rawRoles.map((e) => e.toString()).toList();
             
-            // Simpan sebagai List untuk pengecekan fleksibel
             await prefs.setStringList('user_roles', rolesList);
             
-            // Simpan juga string role pertama untuk kemudahan akses (misal: 'Perental' atau 'Penyewa')
             if (rolesList.isNotEmpty) {
               await prefs.setString('role', rolesList.first);
             }
           }
         }
 
-        debugPrint('✅ Login sukses! User: ${userData?['email']}');
+        debugPrint('✅ Login sukses! User ID: ${userData?['id']} | Email: ${userData?['email']}');
 
         // Navigasi ke Dashboard
         if (mounted) {

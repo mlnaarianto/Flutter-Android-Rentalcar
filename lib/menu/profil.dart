@@ -24,9 +24,19 @@ class _ProfilPageState extends State<ProfilPage> {
   final TextEditingController _hpController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
 
+  // Controller Tambahan untuk SIM
+  final TextEditingController _simNumberController = TextEditingController();
+  final TextEditingController _simTypeController = TextEditingController();
+  final TextEditingController _simExpiredController = TextEditingController();
+
   String? avatarUrl;
+  
   File? ktpImage;
   String? ktpUrl;
+
+  // Variabel untuk SIM Image
+  File? simImage;
+  String? simUrl;
 
   bool _isLoading = true;
 
@@ -73,6 +83,12 @@ class _ProfilPageState extends State<ProfilPage> {
           _tglLahirController.text = personalData['birth_date'] ?? '';
           _addressController.text = personalData['address'] ?? '';
           ktpUrl = personalData['ktp_image']; 
+
+          // Set Data SIM dari Server
+          _simNumberController.text = personalData['sim_number'] ?? '';
+          _simTypeController.text = personalData['sim_type'] ?? '';
+          _simExpiredController.text = personalData['sim_expired_date'] ?? '';
+          simUrl = personalData['sim_image'];
           
           avatarUrl = fetchedAvatar;
           _isLoading = false;
@@ -90,7 +106,7 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= DATE =================
+  /// ================= DATE PICKER (Lahir) =================
   Future<void> _pickDate() async {
     DateTime? picked = await showDatePicker(
       context: context,
@@ -108,7 +124,25 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= KTP =================
+  /// ================= DATE PICKER (SIM Expired) =================
+  Future<void> _pickSimExpiredDate() async {
+    DateTime? picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime(DateTime.now().year + 15),
+      initialDate: DateTime.now(),
+    );
+
+    if (picked != null) {
+      String formattedDate =
+          "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      setState(() {
+        _simExpiredController.text = formattedDate;
+      });
+    }
+  }
+
+  /// ================= UPLOAD KTP =================
   Future<void> _uploadKtp() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image =
@@ -121,12 +155,32 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
+  /// ================= UPLOAD SIM =================
+  Future<void> _uploadSim() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image =
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+
+    if (image != null) {
+      setState(() {
+        simImage = File(image.path);
+      });
+    }
+  }
+
   /// ================= SAVE =================
   Future<void> _saveProfile() async {
     if (_formKey.currentState!.validate()) {
       if (ktpImage == null && ktpUrl == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Foto KTP wajib diupload")),
+        );
+        return;
+      }
+
+      if (simImage == null && simUrl == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Foto SIM wajib diupload untuk Driver/Penyewa")),
         );
         return;
       }
@@ -149,14 +203,25 @@ class _ProfilPageState extends State<ProfilPage> {
 
         request.fields['_method'] = 'PATCH';
 
-        // Hanya mengirim data personal yang wajib dilengkapi
+        // Data Personal Umum
         request.fields['phone'] = _hpController.text;
         request.fields['birth_date'] = _tglLahirController.text;
         request.fields['address'] = _addressController.text;
 
+        // Data SIM
+        request.fields['sim_number'] = _simNumberController.text;
+        request.fields['sim_type'] = _simTypeController.text;
+        request.fields['sim_expired_date'] = _simExpiredController.text;
+
         if (ktpImage != null) {
           request.files.add(
             await http.MultipartFile.fromPath('ktp', ktpImage!.path),
+          );
+        }
+
+        if (simImage != null) {
+          request.files.add(
+            await http.MultipartFile.fromPath('sim_image', simImage!.path),
           );
         }
 
@@ -166,9 +231,8 @@ class _ProfilPageState extends State<ProfilPage> {
         if (response.statusCode == 200) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Data personal berhasil disimpan")),
+              const SnackBar(content: Text("Data personal & SIM berhasil disimpan")),
             );
-            // Kembali ke halaman sebelumnya (misal kembali ke form tambah mobil)
             Navigator.pop(context, true);
           }
         } else {
@@ -200,7 +264,7 @@ class _ProfilPageState extends State<ProfilPage> {
   @override
   Widget build(BuildContext context) {
     return AppLayout(
-      title: "Lengkapi Data Personal",
+      title: "Lengkapi Data & SIM",
       currentIndex: 3,
       onTap: _onBottomTap,
       content: _isLoading
@@ -212,7 +276,7 @@ class _ProfilPageState extends State<ProfilPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    /// ================= AVATAR (Google Login - ReadOnly) =================
+                    /// ================= AVATAR =================
                     Center(
                       child: Stack(
                         children: [
@@ -236,7 +300,7 @@ class _ProfilPageState extends State<ProfilPage> {
 
                     const SizedBox(height: 25),
 
-                    /// ================= NAMA (Google Login - ReadOnly) =================
+                    /// ================= NAMA =================
                     TextFormField(
                       controller: _namaController,
                       readOnly: true,
@@ -251,7 +315,7 @@ class _ProfilPageState extends State<ProfilPage> {
 
                     const SizedBox(height: 15),
 
-                    /// ================= EMAIL (Google Login - ReadOnly) =================
+                    /// ================= EMAIL =================
                     TextFormField(
                       controller: _emailController,
                       readOnly: true,
@@ -358,12 +422,6 @@ class _ProfilPageState extends State<ProfilPage> {
                                               fontSize: 16,
                                               fontWeight: FontWeight.w500),
                                         ),
-                                        SizedBox(height: 6),
-                                        Text(
-                                          "Ketuk untuk memilih dari galeri",
-                                          style: TextStyle(
-                                              fontSize: 12, color: Colors.grey),
-                                        ),
                                       ],
                                     ))
                               : ClipRRect(
@@ -377,9 +435,119 @@ class _ProfilPageState extends State<ProfilPage> {
                       ),
                     ),
 
+                    const SizedBox(height: 25),
+
+                    /// ================= BAGIAN SIM =================
+                    const Divider(thickness: 1.5),
+                    const SizedBox(height: 10),
+                    const Text(
+                      "Informasi SIM (Wajib untuk Driver/Penyewa)",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 15),
+
+                    // Nomor SIM
+                    TextFormField(
+                      controller: _simNumberController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: "Nomor SIM",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.badge),
+                      ),
+                      validator: (v) => v == null || v.isEmpty
+                          ? "Nomor SIM wajib diisi"
+                          : null,
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    // Jenis/Golongan SIM
+                    TextFormField(
+                      controller: _simTypeController,
+                      decoration: const InputDecoration(
+                        labelText: "Golongan SIM (Contoh: A, C, B1)",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.category),
+                      ),
+                      validator: (v) => v == null || v.isEmpty
+                          ? "Golongan SIM wajib diisi"
+                          : null,
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    // Masa Berlaku SIM
+                    TextFormField(
+                      controller: _simExpiredController,
+                      readOnly: true,
+                      onTap: _pickSimExpiredDate,
+                      decoration: const InputDecoration(
+                        labelText: "Masa Berlaku SIM",
+                        border: OutlineInputBorder(),
+                        suffixIcon: Icon(Icons.event_busy),
+                      ),
+                      validator: (v) => v == null || v.isEmpty
+                          ? "Masa berlaku SIM wajib diisi"
+                          : null,
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    // Foto SIM
+                    const Text(
+                      "Foto SIM (Wajib)",
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 10),
+
+                    GestureDetector(
+                      onTap: _uploadSim,
+                      child: AspectRatio(
+                        aspectRatio: 1.6,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.orange, width: 1.5),
+                            color: Colors.orange.withOpacity(0.05),
+                          ),
+                          child: simImage == null
+                              ? (simUrl != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: Image.network(
+                                        simUrl!,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    )
+                                  : Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: const [
+                                        Icon(Icons.directions_car,
+                                            size: 48, color: Colors.orange),
+                                        SizedBox(height: 10),
+                                        Text(
+                                          "Upload Foto SIM",
+                                          style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w500),
+                                        ),
+                                      ],
+                                    ))
+                              : ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Image.file(
+                                    simImage!,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+
                     const SizedBox(height: 30),
 
-                    /// ================= SAVE =================
+                    /// ================= SAVE BUTTON =================
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -389,7 +557,8 @@ class _ProfilPageState extends State<ProfilPage> {
                           foregroundColor: Colors.white,
                         ),
                         onPressed: _saveProfile,
-                        child: const Text("Simpan Data Personal", style: TextStyle(fontSize: 16)),
+                        child: const Text("Simpan Data Personal & SIM",
+                            style: TextStyle(fontSize: 16)),
                       ),
                     ),
                   ],

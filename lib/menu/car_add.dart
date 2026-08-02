@@ -30,6 +30,7 @@ class _CarAddPageState extends State<CarAddPage> {
   final TextEditingController _driverPriceController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _fuelSpecController = TextEditingController();
+  final TextEditingController _videoUrlController = TextEditingController(); // 👈 Controller Link Video
 
   // Nilai Default Dropdown
   String _engineType = 'Bensin (Gasoline)';
@@ -62,6 +63,7 @@ class _CarAddPageState extends State<CarAddPage> {
       _driverPriceController.text = car['driver_price_per_day']?.toString() ?? '';
       _descController.text = car['description'] ?? '';
       _fuelSpecController.text = car['fuel_spec'] ?? '';
+      _videoUrlController.text = car['video_url'] ?? ''; // 👈 Set nilai video_url jika mode edit
 
       if (_engineTypes.contains(car['engine_type'])) {
         _engineType = car['engine_type'];
@@ -146,6 +148,7 @@ class _CarAddPageState extends State<CarAddPage> {
       request.fields['price_per_day'] = _priceController.text.trim();
       request.fields['driver_price_per_day'] = _driverPriceController.text.trim();
       request.fields['description'] = _descController.text.trim();
+      request.fields['video_url'] = _videoUrlController.text.trim(); // 👈 Kirim data video_url ke server
       request.fields['status'] = _status;
 
       if (_imageFile != null) {
@@ -166,7 +169,6 @@ class _CarAddPageState extends State<CarAddPage> {
         );
         Navigator.pop(context, true); 
       } else if (response.statusCode == 403) {
-        // Tangkap pesan dari backend jika ada
         String message = 'Lengkapi Data Personal (No. HP & KTP) terlebih dahulu.';
         try {
           final body = jsonDecode(response.body);
@@ -177,13 +179,7 @@ class _CarAddPageState extends State<CarAddPage> {
 
         _showSnackBar(message, Colors.orange);
 
-        // 🚀 Langsung arahkan ke Halaman Profil / Menu Pengisian Data
-        // Ganti '/profil' dengan rute yang sesuai di aplikasi Anda atau gunakan MaterialPageRoute
         if (mounted) {
-          // Opsi A Menggunakan Named Route:
-          // Navigator.pushNamed(context, '/profil');
-          
-          // Opsi B Langsung Panggil Widget Halaman Profil:
           Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const ProfilPage()),
@@ -226,6 +222,7 @@ class _CarAddPageState extends State<CarAddPage> {
     _driverPriceController.dispose();
     _descController.dispose();
     _fuelSpecController.dispose();
+    _videoUrlController.dispose(); // 👈 Dispose controller video_url
     super.dispose();
   }
 
@@ -391,6 +388,17 @@ class _CarAddPageState extends State<CarAddPage> {
                 decoration: const InputDecoration(
                   labelText: 'Tarif Driver per Hari (Rp) - Opsional/0 jika lepas kunci',
                   border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 👇 Input Link Video / YouTube
+              TextFormField(
+                controller: _videoUrlController,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Link Video Review (Opsional: YouTube/Drive)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.video_library),
                 ),
               ),
               const SizedBox(height: 12),

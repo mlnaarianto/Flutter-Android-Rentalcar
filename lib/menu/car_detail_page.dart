@@ -2,8 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:youtube_player_flutter/youtube_player_flutter.dart'; // 👈 Import youtube_player_flutter
+
 import 'package:rentalcar/config/api_config.dart';
-// 👇 Diaktifkan kembali import form booking
 import 'package:rentalcar/menu/booking_form_page.dart'; 
 
 class CarDetailPage extends StatefulWidget {
@@ -19,6 +20,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
   Map<String, dynamic>? _car;
   bool _isLoading = true;
   String? _errorMessage;
+  
+  // Controller untuk Youtube Player Flutter
+  YoutubePlayerController? _youtubeController;
 
   @override
   void initState() {
@@ -54,8 +58,26 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        final carData = data['data'];
+        
+        // 👈 Ambil dan ekstrak Video ID untuk youtube_player_flutter
+        String? videoUrl = carData['video_url'];
+        if (videoUrl != null && videoUrl.isNotEmpty) {
+          String? videoId = YoutubePlayer.convertUrlToId(videoUrl);
+          if (videoId != null) {
+            _youtubeController = YoutubePlayerController(
+              initialVideoId: videoId,
+              flags: const YoutubePlayerFlags(
+                autoPlay: false,
+                mute: false,
+                enableCaption: true,
+              ),
+            );
+          }
+        }
+
         setState(() {
-          _car = data['data'];
+          _car = carData;
           _isLoading = false;
         });
       } else {
@@ -70,6 +92,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
         _isLoading = false;
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _youtubeController?.dispose(); // 👈 Tutup controller video saat halaman ditutup
+    super.dispose();
   }
 
   String _getImageUrl(String? imagePath) {
@@ -191,7 +219,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          // 👇 Tampilkan informasi tarif driver dinamis
                           Text(
                             'Tarif Jasa Driver: Rp $driverPrice / hari',
                             style: const TextStyle(
@@ -201,6 +228,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             ),
                           ),
                           const Divider(height: 24),
+                          
+                          // Informasi Pemilik / Perental
                           const Text(
                             'Informasi Pemilik / Perental',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -211,6 +240,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             _buildInfoRow(Icons.email, 'Email', ownerEmail),
                           _buildInfoRow(Icons.phone, 'Nomor HP', ownerPhone),
                           _buildInfoRow(Icons.location_on, 'Alamat', ownerAddress),
+                          
                           const Divider(height: 24),
                           const Text(
                             'Spesifikasi Kendaraan',
@@ -224,6 +254,25 @@ class _CarDetailPageState extends State<CarDetailPage> {
                           _buildInfoRow(Icons.airline_seat_recline_normal, 'Kapasitas Kursi', '${_car!['seats']} Kursi'),
                           _buildInfoRow(Icons.calendar_today, 'Tahun Pembuatan', '${_car!['year']}'),
                           const SizedBox(height: 16),
+                          
+                          // 👇 TAMPILKAN VIDEO PLAYER FLUTTER JIKA CONTROLLER TERSEDIA
+                          if (_youtubeController != null) ...[
+                            const Text(
+                              'Video Review Kendaraan',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: YoutubePlayer(
+                                controller: _youtubeController!,
+                                showVideoProgressIndicator: true,
+                                progressIndicatorColor: Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+
                           const Text(
                             'Deskripsi',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),

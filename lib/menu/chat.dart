@@ -3,15 +3,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:rentalcar/layouts/app.dart';
 
 class ChatPage extends StatefulWidget {
-  final String chatId;          
+  final String chatId;           
   final String currentUserId;   
   final String currentUserName; 
+  final String receiverName; // Judul AppBar / Lawan Chat
 
   const ChatPage({
     super.key,
     required this.chatId,
     required this.currentUserId,
     required this.currentUserName,
+    required this.receiverName,
   });
 
   @override
@@ -41,12 +43,12 @@ class _ChatPageState extends State<ChatPage> {
         'created_at': FieldValue.serverTimestamp(),
       });
 
-      // 2. Update dokumen utama room chat agar terdeteksi di admin Filament
+      // 2. Update dokumen utama room chat
       await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).set({
         'last_message': messageText,
         'updated_at': FieldValue.serverTimestamp(),
-        'user_id': widget.currentUserId,
-        'user_name': widget.currentUserName,
+        'last_sender_id': widget.currentUserId,
+        'last_sender_name': widget.currentUserName,
       }, SetOptions(merge: true));
 
       Future.delayed(const Duration(milliseconds: 200), () {
@@ -66,7 +68,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     return AppLayout(
-      title: "Admin Rental (CS)",
+      title: widget.receiverName,
       currentIndex: 2,
       onTap: (index) {
         if (index == 0 || index == 1) {
@@ -106,7 +108,7 @@ class _ChatPageState extends State<ChatPage> {
                           border: Border.all(color: const Color(0xFFFFEEBA)),
                         ),
                         child: const Text(
-                          "Pesan aman dan terenkripsi. Silakan tanyakan ketersediaan mobil atau detail rental kepada Admin.",
+                          "Pesan aman dan terenkripsi. Silakan mulai percakapan.",
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Color(0xFF856404), fontSize: 13),
                         ),
@@ -123,12 +125,7 @@ class _ChatPageState extends State<ChatPage> {
                       final String text = data['text'] ?? data['message'] ?? '';
                       final String senderId = data['sender_id']?.toString() ?? '';
                       
-                      // Cek apakah pesan dikirim oleh admin Filament atau user yang sedang login
-                      bool isAdmin = senderId == 'admin';
-                      bool isMyMessage = senderId == widget.currentUserId;
-
-                      // Jika pesan dari admin -> posisinya di kiri (CS). Jika pesan dari user login -> posisinya di kanan.
-                      bool isMe = isMyMessage; 
+                      bool isMe = senderId == widget.currentUserId;
 
                       String timeString = "";
                       var rawTime = data['created_at'];
@@ -201,7 +198,6 @@ class _ChatPageState extends State<ChatPage> {
                 },
               ),
             ),
-            
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               color: const Color(0xFFF0F2F5),
