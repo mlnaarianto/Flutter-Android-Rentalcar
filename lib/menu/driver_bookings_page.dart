@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/chat.dart';
+import 'package:rentalcar/enums/app_enums.dart';
 
 class DriverBookingsPage extends StatefulWidget {
   const DriverBookingsPage({super.key});
@@ -25,12 +26,18 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     _fetchDriverBookings();
   }
 
+  // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '-';
+    return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
+  }
+
   // Ambil data user aktif (driver) dari SharedPreferences
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _currentUserId = prefs.getString('user_id') ?? '';
-      _currentUserName = prefs.getString('user_name') ?? 'Driver';
+      _currentUserName = prefs.getString('user_name') ?? AppRole.driver.value;
     });
   }
 
@@ -44,7 +51,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
       final response = await http.get(
         Uri.parse(
           '${ApiConfig.baseUrl}/bookings',
-        ), // ✅ route yang benar dan sudah handle role Driver
+        ), 
         headers: {
           'Accept': 'application/json',
           'Authorization': 'Bearer $token',
@@ -65,7 +72,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     }
   }
 
-  // Navigasi ke Halaman Chat Driver $\leftrightarrow$ Perental (Pemilik Rental)
+  // Navigasi ke Halaman Chat Driver <-> Perental (Pemilik Rental)
   void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) {
     final String ownerId = rentalOwner['id']?.toString() ?? '';
     final String ownerName = rentalOwner['name'] ?? 'Perental';
@@ -78,7 +85,6 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     }
 
     // Format unik room chat antara perental dan driver (harus sama persis dengan sisi perental)
-    // room_rental_${ownerId}_driver_${_currentUserId}
     final String uniqueChatId =
         'room_rental_${ownerId}_driver_${_currentUserId}';
 
@@ -88,7 +94,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '',
-          currentUserName: _currentUserName ?? 'Driver',
+          currentUserName: _currentUserName ?? AppRole.driver.value,
           receiverName: "Perental: $ownerName",
         ),
       ),
@@ -133,6 +139,10 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                       car['user'] ??
                       {};
                   final String currentStatus = booking['status'] ?? 'pending';
+
+                  // Memformat tanggal mulai dan selesai secara bersih
+                  final String startDateFormatted = _formatDate(booking['start_date']);
+                  final String endDateFormatted = _formatDate(booking['end_date']);
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -181,7 +191,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                           const SizedBox(height: 6),
                           Text('Penyewa Mobil: ${renter['name'] ?? '-'}'),
                           Text(
-                            'Jadwal: ${booking['start_date']} s/d ${booking['end_date']}',
+                            'Jadwal: $startDateFormatted s/d $endDateFormatted',
                           ),
                           const Divider(height: 16),
 

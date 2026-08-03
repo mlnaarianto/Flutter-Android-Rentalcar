@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/widgets/bottom.dart';
 import 'package:rentalcar/menu/chat.dart';
+import 'package:rentalcar/enums/app_enums.dart';
 
 class BookingHistoryPage extends StatefulWidget {
   const BookingHistoryPage({super.key});
@@ -27,10 +28,16 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     _loadUserRoleAndBookings();
   }
 
+  // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '-';
+    return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
+  }
+
   Future<void> _loadUserRoleAndBookings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _currentUserRole = prefs.getString('role') ?? 'Penyewa'; 
+      _currentUserRole = prefs.getString('role') ?? AppRole.penyewa.value; 
       _currentUserId = prefs.getString('user_id') ?? '3';
       _currentUserName = prefs.getString('user_name') ?? 'Penyewa';
     });
@@ -97,24 +104,29 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Booking berhasil dibatalkan.')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Booking berhasil dibatalkan.')),
+          );
+        }
         _fetchBookings(); 
       } else {
         final decoded = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(decoded['message'] ?? 'Gagal membatalkan pesanan')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(decoded['message'] ?? 'Gagal membatalkan pesanan')),
+          );
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
-  // Simulasi Pembayaran QRIS (Untuk Penyewa)
   Future<void> _simulateQrisPayment(int bookingId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -131,25 +143,30 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pembayaran QRIS Berhasil Dikonfirmasi! Status: Lunas.')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Pembayaran QRIS Berhasil Dikonfirmasi! Status: Lunas.')),
+          );
+        }
       } else {
         final decoded = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(decoded['message'] ?? 'Gagal memperbarui status pembayaran')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(decoded['message'] ?? 'Gagal memperbarui status pembayaran')),
+          );
+        }
       }
       _fetchBookings();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
       _fetchBookings();
     }
   }
 
-  // Konfirmasi Pembayaran Tunai/COD LUNAS (Khusus Driver / Perental)
   Future<void> _confirmCodPayment(int bookingId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -166,25 +183,30 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pembayaran Tunai (COD) berhasil dikonfirmasi LUNAS!')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Pembayaran Tunai (COD) berhasil dikonfirmasi LUNAS!')),
+          );
+        }
       } else {
         final decoded = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(decoded['message'] ?? 'Gagal mengkonfirmasi pembayaran')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(decoded['message'] ?? 'Gagal mengkonfirmasi pembayaran')),
+          );
+        }
       }
       _fetchBookings();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
       _fetchBookings();
     }
   }
 
-  // Fungsi navigasi membuka chat dari history dengan pencarian ID perental yang aman
   void _openChatWithOwner(dynamic carData) {
     if (carData == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -193,10 +215,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       return;
     }
 
-    // Ambil data pemilik dari beberapa kemungkinan key struktur JSON API
     final ownerMap = carData['user'] ?? carData['owner'];
     
-    // Cari ID pemilik dengan prioritas: ownerMap['id'] -> carData['user_id'] -> fallback ke '2' (atau ID default perental)
     final String ownerId = ownerMap != null && ownerMap['id'] != null 
         ? ownerMap['id'].toString() 
         : (carData['user_id']?.toString() ?? '2'); 
@@ -212,7 +232,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       return;
     }
 
-    // Format chatId konsisten: room_rental_[ID_Perental]_user_[ID_Penyewa]
     final String uniqueChatId = 'room_rental_${ownerId}_user_${_currentUserId ?? '3'}';
 
     Navigator.push(
@@ -318,9 +337,13 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         final bool withDriver = booking['with_driver'] == 1 || booking['with_driver'] == true;
 
                         final String role = (_currentUserRole ?? '').toLowerCase();
-                        bool isStaffOrDriver = role.contains('driver') || 
-                                               role.contains('perental') || 
+                        bool isStaffOrDriver = role.contains(AppRole.driver.value.toLowerCase()) || 
+                                               role.contains(AppRole.perental.value.toLowerCase()) || 
                                                role.contains('super admin');
+
+                        // Memformat tanggal mulai dan selesai secara bersih
+                        final String startDateFormatted = _formatDate(booking['start_date']);
+                        final String endDateFormatted = _formatDate(booking['end_date']);
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -359,7 +382,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                   ],
                                 ),
                                 const SizedBox(height: 6),
-                                Text('Mulai: ${booking['start_date']} s/d ${booking['end_date']}'),
+                                Text('Mulai: $startDateFormatted s/d $endDateFormatted'),
                                 Text('Durasi: ${booking['total_days']} Hari'),
                                 Text('Layanan: ${withDriver ? "Dengan Driver" : "Lepas Kunci"}', 
                                   style: TextStyle(color: withDriver ? Colors.indigo : Colors.grey.shade700, fontWeight: FontWeight.w500)),
@@ -405,13 +428,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                 Text('Total Biaya: Rp ${booking['total_price']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 15)),
                                 const Divider(height: 20),
                                 
-                                // Aksi Tombol (Pembayaran, Chat, dan Batal)
                                 Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
                                   alignment: WrapAlignment.spaceBetween,
                                   children: [
-                                    // 1. Jika Penyewa dan metode QRIS (Belum Lunas) -> Muncul tombol Bayar QRIS
                                     if (!isStaffOrDriver && paymentStatus != 'paid' && paymentMethod == 'qris' && status != 'cancelled')
                                       ElevatedButton.icon(
                                         style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
@@ -420,7 +441,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                         label: const Text('Bayar via QRIS', style: TextStyle(fontSize: 12)),
                                       ),
 
-                                    // 2. Jika Driver/Perental dan metode COD (Belum Lunas) -> Muncul tombol Konfirmasi Tunai Lunas
                                     if (isStaffOrDriver && paymentStatus != 'paid' && paymentMethod == 'cod' && status != 'cancelled')
                                       ElevatedButton.icon(
                                         style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),
@@ -429,7 +449,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                         label: const Text('Konfirmasi Tunai Lunas', style: TextStyle(fontSize: 12)),
                                       ),
 
-                                    // 3. Tombol Chat Perental
                                     ElevatedButton.icon(
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.teal,
@@ -442,7 +461,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                       onPressed: () => _openChatWithOwner(car),
                                     ),
 
-                                    // 4. Tombol Batalkan (hanya untuk status pending)
                                     if (status == 'pending')
                                       OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(foregroundColor: Colors.red, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), minimumSize: Size.zero),

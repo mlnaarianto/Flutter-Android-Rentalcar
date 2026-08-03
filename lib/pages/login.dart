@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -89,7 +90,6 @@ class _LoginPageState extends State<LoginPage> {
         await prefs.setString('access_token', sanctumToken);
 
         if (userData != null) {
-          // 👇 SIMPAN USER ID AGAR CHAT DAN RIWAYAT SINKRON
           if (userData['id'] != null) {
             await prefs.setString('user_id', userData['id'].toString());
           }
@@ -101,7 +101,7 @@ class _LoginPageState extends State<LoginPage> {
             await prefs.setString('avatar_url', userData['avatar']);
           }
 
-          // Simpan role Spatie dengan benar
+          // 1. Simpan Role Spatie
           if (userData['roles'] != null) {
             List<dynamic> rawRoles = userData['roles'];
             List<String> rolesList = rawRoles.map((e) => e.toString()).toList();
@@ -111,6 +111,14 @@ class _LoginPageState extends State<LoginPage> {
             if (rolesList.isNotEmpty) {
               await prefs.setString('role', rolesList.first);
             }
+          }
+
+          // 2. 👇 SIMPAN PERMISSIONS SPATIE (Agar Flutter bisa validasi pakai AppPermission)
+          if (userData['permissions'] != null) {
+            List<dynamic> rawPermissions = userData['permissions'];
+            List<String> permissionsList = rawPermissions.map((e) => e.toString()).toList();
+            
+            await prefs.setStringList('user_permissions', permissionsList);
           }
         }
 

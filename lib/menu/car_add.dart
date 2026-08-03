@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/profil.dart'; 
+import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums agar konsisten
 
 class CarAddPage extends StatefulWidget {
   final Map<String, dynamic>? carData; // Jika ada data, berarti mode Edit
@@ -30,7 +31,7 @@ class _CarAddPageState extends State<CarAddPage> {
   final TextEditingController _driverPriceController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _fuelSpecController = TextEditingController();
-  final TextEditingController _videoUrlController = TextEditingController(); // 👈 Controller Link Video
+  final TextEditingController _videoUrlController = TextEditingController(); 
 
   // Nilai Default Dropdown
   String _engineType = 'Bensin (Gasoline)';
@@ -63,7 +64,7 @@ class _CarAddPageState extends State<CarAddPage> {
       _driverPriceController.text = car['driver_price_per_day']?.toString() ?? '';
       _descController.text = car['description'] ?? '';
       _fuelSpecController.text = car['fuel_spec'] ?? '';
-      _videoUrlController.text = car['video_url'] ?? ''; // 👈 Set nilai video_url jika mode edit
+      _videoUrlController.text = car['video_url'] ?? ''; 
 
       if (_engineTypes.contains(car['engine_type'])) {
         _engineType = car['engine_type'];
@@ -148,7 +149,7 @@ class _CarAddPageState extends State<CarAddPage> {
       request.fields['price_per_day'] = _priceController.text.trim();
       request.fields['driver_price_per_day'] = _driverPriceController.text.trim();
       request.fields['description'] = _descController.text.trim();
-      request.fields['video_url'] = _videoUrlController.text.trim(); // 👈 Kirim data video_url ke server
+      request.fields['video_url'] = _videoUrlController.text.trim(); 
       request.fields['status'] = _status;
 
       if (_imageFile != null) {
@@ -222,7 +223,7 @@ class _CarAddPageState extends State<CarAddPage> {
     _driverPriceController.dispose();
     _descController.dispose();
     _fuelSpecController.dispose();
-    _videoUrlController.dispose(); // 👈 Dispose controller video_url
+    _videoUrlController.dispose(); 
     super.dispose();
   }
 
@@ -391,12 +392,11 @@ class _CarAddPageState extends State<CarAddPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              // 👇 Input Link Video / YouTube
               TextFormField(
                 controller: _videoUrlController,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                  labelText: 'Link Video Review (Opsional: YouTube/Drive)',
+                  labelText: 'Link Video Review (Opsional: YouTube)',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.video_library),
                 ),

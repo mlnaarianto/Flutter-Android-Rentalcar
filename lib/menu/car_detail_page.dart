@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart'; // 👈 Import youtube_player_flutter
+import 'package:youtube_player_flutter/youtube_player_flutter.dart'; 
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/booking_form_page.dart'; 
@@ -60,7 +60,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
         final data = jsonDecode(response.body);
         final carData = data['data'];
         
-        // 👈 Ambil dan ekstrak Video ID untuk youtube_player_flutter
+        // Ambil dan ekstrak Video ID untuk youtube_player_flutter
         String? videoUrl = carData['video_url'];
         if (videoUrl != null && videoUrl.isNotEmpty) {
           String? videoId = YoutubePlayer.convertUrlToId(videoUrl);
@@ -96,7 +96,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   @override
   void dispose() {
-    _youtubeController?.dispose(); // 👈 Tutup controller video saat halaman ditutup
+    _youtubeController?.dispose(); 
     super.dispose();
   }
 
@@ -255,7 +255,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                           _buildInfoRow(Icons.calendar_today, 'Tahun Pembuatan', '${_car!['year']}'),
                           const SizedBox(height: 16),
                           
-                          // 👇 TAMPILKAN VIDEO PLAYER FLUTTER JIKA CONTROLLER TERSEDIA
+                          // Tampilkan Video Player Flutter jika controller tersedia
                           if (_youtubeController != null) ...[
                             const Text(
                               'Video Review Kendaraan',

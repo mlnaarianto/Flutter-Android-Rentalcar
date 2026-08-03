@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/enums/app_enums.dart';
 
 class ProfilPage extends StatefulWidget {
   const ProfilPage({super.key});
@@ -75,19 +76,30 @@ class _ProfilPageState extends State<ProfilPage> {
           await prefs.setString('avatar_url', fetchedAvatar);
         }
 
+        // Fungsi helper untuk membersihkan format tanggal ISO (misal: 2000-01-01T00:00:00.000000Z -> 2000-01-01)
+        String formatDate(String? dateStr) {
+          if (dateStr == null || dateStr.isEmpty) return '';
+          return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
+        }
+
         setState(() {
           _namaController.text = userData['name'] ?? '';
           _emailController.text = userData['email'] ?? '';
           
           _hpController.text = personalData['phone'] ?? '';
-          _tglLahirController.text = personalData['birth_date'] ?? '';
           _addressController.text = personalData['address'] ?? '';
           ktpUrl = personalData['ktp_image']; 
+
+          // Tanggal Lahir (Dibersihkan formatnya)
+          _tglLahirController.text = formatDate(personalData['birth_date']);
 
           // Set Data SIM dari Server
           _simNumberController.text = personalData['sim_number'] ?? '';
           _simTypeController.text = personalData['sim_type'] ?? '';
-          _simExpiredController.text = personalData['sim_expired_date'] ?? '';
+          
+          // Masa Berlaku SIM (Dibersihkan formatnya)
+          _simExpiredController.text = formatDate(personalData['sim_expired_date']);
+          
           simUrl = personalData['sim_image'];
           
           avatarUrl = fetchedAvatar;

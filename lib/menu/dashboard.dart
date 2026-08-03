@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/menu/car_detail_page.dart';
+import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -33,9 +34,8 @@ class _DashboardState extends State<Dashboard> {
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      // 👇 PERBAIKAN: Gunakan 'user_name' sesuai yang disimpan saat proses login
       _userName = prefs.getString('user_name') ?? prefs.getString('email')?.split('@')[0] ?? 'Pengguna';
-      _userRole = prefs.getString('role') ?? 'Penyewa';
+      _userRole = prefs.getString('role') ?? AppRole.penyewa.value;
     });
   }
 
@@ -139,7 +139,8 @@ class _DashboardState extends State<Dashboard> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _userRole == 'Perental'
+                      // 👇 Menggunakan AppRole.perental.value agar bersih dari hardcode string
+                      _userRole == AppRole.perental.value
                           ? 'Kelola armada rental mobil Anda dengan mudah di sini.'
                           : 'Temukan mobil impian untuk perjalanan nyaman Anda hari ini.',
                       style: const TextStyle(color: Colors.white70, fontSize: 13),

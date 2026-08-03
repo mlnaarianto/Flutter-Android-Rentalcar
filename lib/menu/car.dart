@@ -6,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/widgets/bottom.dart';
 import 'package:rentalcar/menu/car_add.dart';
-import 'package:rentalcar/menu/car_detail_page.dart'; // 👈 Import halaman detail mobil
+import 'package:rentalcar/menu/car_detail_page.dart'; 
+import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
 
 class CarPage extends StatefulWidget {
   const CarPage({super.key});
@@ -77,15 +78,12 @@ class _CarPageState extends State<CarPage> {
   String _getImageUrl(String? imagePath) {
     if (imagePath == null || imagePath.isEmpty) return '';
     
-    // Jika dari backend sudah berupa URL lengkap (mengandung http:// atau https://), gunakan langsung
     if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
       return imagePath;
     }
     
-    // Jika path relatif, gabungkan dengan domain server & /storage/
     final serverRoot = ApiConfig.baseUrl.replaceAll('/api', '');
     
-    // Bersihkan slash ganda jika ada
     if (imagePath.startsWith('/')) {
       return '$serverRoot$imagePath';
     } else {
@@ -115,7 +113,7 @@ class _CarPageState extends State<CarPage> {
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
-          // 👇 Batasi Tombol Tambah Mobil berdasarkan Role dari SharedPreferences
+          // 👇 Batasi Tombol Tambah Mobil berdasarkan AppRole Enum
           FutureBuilder<SharedPreferences>(
             future: SharedPreferences.getInstance(),
             builder: (context, snapshot) {
@@ -125,7 +123,7 @@ class _CarPageState extends State<CarPage> {
               final role = prefs.getString('role') ?? '';
               
               // Sembunyikan tombol tambah jika role adalah Penyewa atau Driver
-              if (role == 'Penyewa' || role == 'Driver') {
+              if (role == AppRole.penyewa.value || role == AppRole.driver.value) {
                 return const SizedBox.shrink();
               }
 
@@ -187,12 +185,12 @@ class _CarPageState extends State<CarPage> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(12),
                             onTap: () async {
-                              // Cek role saat card diklik untuk navigasi dinamis
+                              // Cek role saat card diklik menggunakan AppRole Enum
                               final prefs = await SharedPreferences.getInstance();
                               final role = prefs.getString('role') ?? '';
                               final carId = car['id'];
 
-                              if (role == 'Penyewa' || role == 'Driver') {
+                              if (role == AppRole.penyewa.value || role == AppRole.driver.value) {
                                 // Jika Penyewa/Driver, arahkan ke halaman Detail Mobil
                                 Navigator.push(
                                   context,

@@ -6,19 +6,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/pages/login.dart';
 import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/menu/dashboard.dart';
-import 'package:rentalcar/menu/car.dart'; 
-import 'package:rentalcar/menu/booking_history_page.dart'; // 👈 Import Halaman Riwayat Booking
+import 'package:rentalcar/menu/car.dart';
+import 'package:rentalcar/menu/booking_history_page.dart';
+import 'package:rentalcar/menu/rental_application_page.dart'; // 👈 Import Halaman Pengajuan Perental
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/enums/app_enums.dart';
 
 class Bottom extends StatefulWidget {
   final int currentIndex;
   final Function(int) onTap;
 
-  const Bottom({
-    super.key,
-    required this.currentIndex,
-    required this.onTap,
-  });
+  const Bottom({super.key, required this.currentIndex, required this.onTap});
 
   @override
   State<Bottom> createState() => _BottomState();
@@ -26,7 +24,7 @@ class Bottom extends StatefulWidget {
 
 class _BottomState extends State<Bottom> {
   String? _avatarUrl;
-  String? _userRole; // 👈 Variabel untuk menyimpan role user yang sedang login
+  String? _userRole;
 
   @override
   void initState() {
@@ -38,7 +36,7 @@ class _BottomState extends State<Bottom> {
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     final String? url = prefs.getString('avatar_url');
-    final String? role = prefs.getString('role'); // Ambil role yang tersimpan
+    final String? role = prefs.getString('role');
 
     if (mounted) {
       setState(() {
@@ -84,17 +82,19 @@ class _BottomState extends State<Bottom> {
         }
 
         await prefs.remove('access_token');
-        await prefs.remove('avatar_url'); 
-        await prefs.remove('role'); // Hapus data role saat logout
+        await prefs.remove('avatar_url');
+        await prefs.remove('role');
+        await prefs.remove('user_permissions');
 
         final GoogleSignIn googleSignIn = GoogleSignIn();
         await googleSignIn.signOut();
       } catch (e) {
-        print('Error saat logout: $e');
+        debugPrint('Error saat logout: $e');
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('access_token');
         await prefs.remove('avatar_url');
         await prefs.remove('role');
+        await prefs.remove('user_permissions');
       }
 
       if (context.mounted) {
@@ -106,7 +106,7 @@ class _BottomState extends State<Bottom> {
     }
   }
 
-  /// ================== MENU PROFILE ==================
+  /// ================== MENU PROFILE / PENGAJUAN ==================
   void _showProfileMenu(BuildContext parentContext) {
     showModalBottomSheet(
       context: parentContext,
@@ -115,14 +115,31 @@ class _BottomState extends State<Bottom> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 👈 Menu Settings diganti menjadi Pengajuan Perental
               ListTile(
-                leading: const Icon(Icons.settings),
-                title: const Text('Settings'),
-                onTap: () => Navigator.pop(sheetContext),
+                leading: const Icon(
+                  Icons.store_mall_directory,
+                  color: Colors.blue,
+                ),
+                title: const Text('Pengajuan Perental'),
+                subtitle: const Text('Daftar jadi partner rental mobil'),
+                onTap: () {
+                  Navigator.pop(sheetContext); // Tutup bottom sheet
+                  Navigator.push(
+                    parentContext,
+                    MaterialPageRoute(
+                      builder: (_) => const RentalApplicationPage(),
+                    ),
+                  );
+                },
               ),
+              const Divider(height: 1),
               ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Logout'),
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text(
+                  'Logout',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _confirmLogout(parentContext);
@@ -160,26 +177,22 @@ class _BottomState extends State<Bottom> {
       selectedItemColor: Colors.blue,
       onTap: (index) {
         if (index == 0) {
-          // Home / Dashboard
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (_) => const Dashboard()),
             (route) => false,
           );
         } else if (index == 1) {
-          // Navigasi ke Halaman Mobil
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const CarPage()),
           );
         } else if (index == 2) {
-          // 👈 Diganti ke Halaman Riwayat Pemesanan (Booking History)
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const BookingHistoryPage()),
           );
         } else if (index == 3) {
-          // Profile
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const ProfilPage()),
@@ -195,10 +208,10 @@ class _BottomState extends State<Bottom> {
         ),
         BottomNavigationBarItem(
           icon: const Icon(Icons.car_rental),
-          label: _userRole == 'Penyewa' ? 'Cari Mobil' : 'Mobil',
+          label: _userRole == AppRole.penyewa.value ? 'Cari Mobil' : 'Mobil',
         ),
         const BottomNavigationBarItem(
-          icon: Icon(Icons.history), // 👈 Ikon Riwayat Pesanan
+          icon: Icon(Icons.history),
           label: 'Riwayat',
         ),
         BottomNavigationBarItem(

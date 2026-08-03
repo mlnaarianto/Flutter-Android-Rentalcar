@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/rentals_booking_page.dart';
 import 'package:rentalcar/menu/chat.dart';
-import 'package:rentalcar/menu/driver_bookings_page.dart'; // 👈 Impor halaman tugas driver yang sudah dibuat sebelumnya
+import 'package:rentalcar/menu/driver_bookings_page.dart'; 
+import 'package:rentalcar/enums/app_enums.dart';
 
 class Sidebar extends StatefulWidget {
   final String userName;
@@ -100,21 +101,6 @@ class _SidebarState extends State<Sidebar> {
             ),
           ),
 
-          ListTile(
-            leading: const Icon(Icons.dashboard),
-            title: const Text('Dashboard'),
-            onTap: () {
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.car_rental),
-            title: const Text('Mobil'),
-            onTap: () {
-              Navigator.pop(context);
-            },
-          ),
-
           // Menu Chat Admin (CS)
           ListTile(
             leading: const Icon(Icons.chat, color: Colors.blue),
@@ -135,8 +121,8 @@ class _SidebarState extends State<Sidebar> {
             },
           ),
 
-          // 👇 MENU KHUSUS DRIVER
-          if (rolesList.contains('Driver')) ...[
+          // MENU KHUSUS DRIVER
+          if (rolesList.contains(AppRole.driver.value)) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -157,22 +143,19 @@ class _SidebarState extends State<Sidebar> {
               title: const Text('Tugas Penugasan'),
               onTap: () {
                 Navigator.pop(context);
-                // Ganti `DriverBookingsPage` dengan nama kelas halaman driver yang Anda buat
-                
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => const DriverBookingsPage(),
                   ),
                 );
-                
               },
             ),
           ],
 
           // Menu Manajemen Rental (Perental / Super Admin)
-          if (rolesList.contains('Perental') ||
-              rolesList.contains('Super Admin')) ...[
+          if (rolesList.contains(AppRole.perental.value) ||
+              rolesList.contains(AppRole.superAdmin.value)) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -204,7 +187,7 @@ class _SidebarState extends State<Sidebar> {
           ],
 
           // Menu Administrator (Super Admin)
-          if (rolesList.contains('Super Admin')) ...[
+          if (rolesList.contains(AppRole.superAdmin.value)) ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),

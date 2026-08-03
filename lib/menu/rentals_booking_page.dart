@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/chat.dart';
+import 'package:rentalcar/enums/app_enums.dart';
 
 class RentalsBookingPage extends StatefulWidget {
   const RentalsBookingPage({super.key});
@@ -25,12 +26,18 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     _fetchBookings();
   }
 
+  // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '-';
+    return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
+  }
+
   // Ambil data user aktif (Perental) dari SharedPreferences
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _currentUserId = prefs.getString('user_id') ?? '3';
-      _currentUserName = prefs.getString('user_name') ?? 'Perental';
+      _currentUserName = prefs.getString('user_name') ?? AppRole.perental.value;
     });
   }
 
@@ -175,19 +182,25 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       final decoded = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Driver berhasil ditugaskan!')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Driver berhasil ditugaskan!')),
+          );
+        }
         _fetchBookings();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(decoded['message'] ?? 'Gagal menugaskan driver')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(decoded['message'] ?? 'Gagal menugaskan driver')),
+          );
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
@@ -210,23 +223,29 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       final decoded = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Status booking berhasil diperbarui!')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Status booking berhasil diperbarui!')),
+          );
+        }
         _fetchBookings();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(decoded['message'] ?? 'Gagal memperbarui status')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(decoded['message'] ?? 'Gagal memperbarui status')),
+          );
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
-  // Navigasi ke Halaman Chat Perental $\leftrightarrow$ Penyewa
+  // Navigasi ke Halaman Chat Perental <-> Penyewa
   void _openChatWithRenter(Map<String, dynamic> renter) {
     final String renterId = renter['id']?.toString() ?? '';
     final String renterName = renter['name'] ?? 'Penyewa';
@@ -246,14 +265,14 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '3',
-          currentUserName: _currentUserName ?? 'Perental',
+          currentUserName: _currentUserName ?? AppRole.perental.value,
           receiverName: "Penyewa: $renterName",
         ),
       ),
     );
   }
 
-  // Navigasi ke Halaman Chat Perental $\leftrightarrow$ Driver
+  // Navigasi ke Halaman Chat Perental <-> Driver
   void _openChatWithDriver(Map<String, dynamic> driver) {
     final String driverId = driver['id']?.toString() ?? '';
     final String driverName = driver['name'] ?? 'Driver';
@@ -265,7 +284,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       return;
     }
 
-    // Format chatId perental dengan driver (Harus sinkron dengan sisi DriverBookingsPage: room_rental_${ownerId}_driver_${driverId})
     final String uniqueChatId = 'room_rental_${_currentUserId}_driver_$driverId';
 
     Navigator.push(
@@ -274,7 +292,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '3',
-          currentUserName: _currentUserName ?? 'Perental',
+          currentUserName: _currentUserName ?? AppRole.perental.value,
           receiverName: "Driver: $driverName",
         ),
       ),
@@ -308,6 +326,10 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                       final String paymentStatus = booking['payment_status'] ?? 'unpaid';
                       final String paymentMethod = booking['payment_method'] ?? 'cod';
 
+                      // Memformat tanggal mulai dan selesai secara bersih
+                      final String startDateFormatted = _formatDate(booking['start_date']);
+                      final String endDateFormatted = _formatDate(booking['end_date']);
+
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
                         elevation: 2,
@@ -324,7 +346,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                                     child: Text('Mobil: ${car['name'] ?? '-'}', 
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                   ),
-                                  // Tombol Shortcut Chat dengan Penyewa
                                   IconButton(
                                     icon: const Icon(Icons.chat_bubble_outline, color: Colors.blue),
                                     tooltip: 'Chat Penyewa',
@@ -334,10 +355,9 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                               ),
                               const SizedBox(height: 4),
                               Text('Penyewa: ${renter['name'] ?? '-'}'),
-                              Text('Tanggal: ${booking['start_date']} s/d ${booking['end_date']} (${booking['total_days']} Hari)'),
+                              Text('Tanggal: $startDateFormatted s/d $endDateFormatted (${booking['total_days']} Hari)'),
                               const Divider(height: 16),
                               
-                              // Status Pesanan (Dropdown Ubah Status)
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -362,7 +382,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                               ),
                               const SizedBox(height: 4),
 
-                              // Informasi Metode Pembayaran
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -375,7 +394,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                               ),
                               const SizedBox(height: 4),
 
-                              // Informasi Status Pembayaran (Paid / Unpaid)
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [

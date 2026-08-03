@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/menu/profil.dart'; // 👈 Sesuaikan path import halaman profil Anda
+import 'package:rentalcar/menu/profil.dart';
 
 class BookingFormPage extends StatefulWidget {
   final Map<String, dynamic> car;
@@ -18,7 +18,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _withDriver = false;
-  String _paymentMethod = 'cod'; // Default pilihan metode pembayaran ('cod' atau 'qris')
+  String _paymentMethod = 'cod';
   final TextEditingController _notesController = TextEditingController();
   bool _isSubmitting = false;
 
@@ -37,6 +37,12 @@ class _BookingFormPageState extends State<BookingFormPage> {
     double carPricePerDay = double.tryParse(widget.car['price_per_day'].toString()) ?? 0;
     double driverFee = _withDriver ? _driverRatePerDay : 0;
     return _totalDays * (carPricePerDay + driverFee);
+  }
+
+  // Fungsi helper untuk memformat DateTime menjadi string bersih (YYYY-MM-DD)
+  String _formatDate(DateTime? date) {
+    if (date == null) return '';
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
   Future<void> _selectDate(BuildContext context, bool isStart) async {
@@ -91,8 +97,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
         },
         body: jsonEncode({
           'car_id': widget.car['id'],
-          'start_date': _startDate!.toIso8601String().split('T')[0],
-          'end_date': _endDate!.toIso8601String().split('T')[0],
+          'start_date': _formatDate(_startDate), // Menggunakan format bersih YYYY-MM-DD
+          'end_date': _formatDate(_endDate),     // Menggunakan format bersih YYYY-MM-DD
           'with_driver': _withDriver,
           'payment_method': _paymentMethod,
           'notes': _notesController.text,
@@ -109,13 +115,11 @@ class _BookingFormPageState extends State<BookingFormPage> {
       } else if (response.statusCode == 403) {
         String message = decoded['message'] ?? 'Akses ditolak.';
         
-        // 🚀 Cek apakah ditolak karena data personal belum lengkap
         if (message.contains('Data Personal')) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(message), backgroundColor: Colors.orange),
           );
           
-          // Langsung arahkan ke ProfilPage untuk melengkapi KTP & No HP
           if (mounted) {
             Navigator.push(
               context,
@@ -123,7 +127,6 @@ class _BookingFormPageState extends State<BookingFormPage> {
             );
           }
         } else {
-          // Jika ditolak karena masih ada pesanan pending
           _showPendingWarningDialog(message);
         }
       } else {
@@ -183,6 +186,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
               style: const TextStyle(color: Colors.indigo, fontWeight: FontWeight.w500),
             ),
             const Divider(height: 30),
+            
+            // Tanggal Mulai Sewa
             ListTile(
               shape: RoundedRectangleBorder(
                 side: const BorderSide(color: Colors.grey, width: 0.5),
@@ -190,11 +195,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
               title: Text(_startDate == null
                   ? 'Pilih Tanggal Mulai'
-                  : 'Mulai: ${_startDate.toString().split(" ")[0]}'),
+                  : 'Mulai: ${_formatDate(_startDate)}'),
               trailing: const Icon(Icons.calendar_today, color: Colors.blue),
               onTap: () => _selectDate(context, true),
             ),
             const SizedBox(height: 12),
+            
+            // Tanggal Selesai Sewa
             ListTile(
               shape: RoundedRectangleBorder(
                 side: const BorderSide(color: Colors.grey, width: 0.5),
@@ -202,7 +209,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
               title: Text(_endDate == null
                   ? 'Pilih Tanggal Selesai'
-                  : 'Selesai: ${_endDate.toString().split(" ")[0]}'),
+                  : 'Selesai: ${_formatDate(_endDate)}'),
               trailing: const Icon(Icons.calendar_today, color: Colors.blue),
               onTap: () => _selectDate(context, false),
             ),
