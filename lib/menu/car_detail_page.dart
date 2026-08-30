@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
@@ -33,6 +34,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
   YoutubePlayerController? _youtubeController;
   bool _isYoutubeVideo = false;
 
+  // Widget player yang dihasilkan oleh YoutubePlayerScaffold.builder.
+  // Ini yang dipakai di dalam card video (bukan YoutubePlayer langsung),
+  // supaya tombol fullscreen bisa benar-benar rotate & menutupi layar penuh
+  // sama seperti Chewie.
+  Widget? _youtubePlayerWidget;
+
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
   static const Color _bgColor = Color(0xFFF4F6F9);
@@ -40,6 +47,16 @@ class _CarDetailPageState extends State<CarDetailPage> {
   @override
   void initState() {
     super.initState();
+    // Izinkan rotasi ke landscape khusus di halaman ini, supaya tombol
+    // fullscreen pada video (Chewie maupun YouTube) bisa benar-benar
+    // memutar device. Halaman lain di app tetap portrait-only karena
+    // ini di-reset lagi di dispose().
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     _fetchCarDetail();
   }
 
@@ -84,6 +101,26 @@ class _CarDetailPageState extends State<CarDetailPage> {
               autoPlay: false,
               params: const YoutubePlayerParams(showFullscreenButton: true),
             );
+
+            // FIX ROTASI: paksa secara eksplisit ke landscape saat masuk
+            // fullscreen, dan balik ke portrait saat keluar. Ini perlu
+            // dipasang manual karena berbeda dari Chewie, YoutubePlayerScaffold
+            // di beberapa kondisi tidak otomatis memaksa rotasi device.
+            _youtubeController!.setFullScreenListener((isFullScreen) {
+              if (isFullScreen) {
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.landscapeLeft,
+                  DeviceOrientation.landscapeRight,
+                ]);
+                SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+              } else {
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.portraitUp,
+                  DeviceOrientation.portraitDown,
+                ]);
+                SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+              }
+            });
           } else {
             _isYoutubeVideo = false;
             _initVideoPlayer(videoUrl);
@@ -181,6 +218,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   @override
   void dispose() {
+    // Kunci lagi ke portrait-only saat meninggalkan halaman ini,
+    // supaya halaman lain di app tidak ikut bisa landscape.
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
     _chewieController?.dispose();
     _videoController?.dispose();
     _youtubeController?.close();
@@ -415,7 +458,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
     final status = _car?['status'] ?? '';
     final driverPrice = _car?['driver_price_per_day'] ?? 0;
 
-    return Scaffold(
+    // Body utama halaman (Scaffold biasa, isinya sama seperti sebelumnya).
+    final scaffoldBody = Scaffold(
       backgroundColor: _bgColor,
       extendBodyBehindAppBar: true,
       body: _isLoading
@@ -430,6 +474,23 @@ class _CarDetailPageState extends State<CarDetailPage> {
           ? null
           : _buildBottomBar(status),
     );
+
+    // Kalau video-nya YouTube, bungkus dengan YoutubePlayerScaffold.
+    // Widget ini WAJIB jadi root/widget paling atas supaya tombol fullscreen
+    // bisa rotate ke landscape & menutupi seluruh layar (persis seperti Chewie).
+    if (_isYoutubeVideo && _youtubeController != null) {
+      return YoutubePlayerScaffold(
+        controller: _youtubeController!,
+        aspectRatio: 16 / 9,
+        builder: (context, player) {
+          // Simpan player yang "sadar fullscreen" ini, dipakai di _buildVideoSection().
+          _youtubePlayerWidget = player;
+          return scaffoldBody;
+        },
+      );
+    }
+
+    return scaffoldBody;
   }
 
   /// ================= STATE: ERROR =================
@@ -788,7 +849,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
         borderRadius: BorderRadius.circular(14),
         child: AspectRatio(
           aspectRatio: 16 / 9,
-          child: YoutubePlayer(controller: _youtubeController!),
+          // Pakai player dari YoutubePlayerScaffold.builder (sudah "sadar" fullscreen).
+          // Fallback ke YoutubePlayer biasa kalau widget-nya belum sempat ke-build.
+          child: _youtubePlayerWidget ??
+              YoutubePlayer(controller: _youtubeController!),
         ),
       );
     }
