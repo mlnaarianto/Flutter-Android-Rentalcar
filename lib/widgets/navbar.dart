@@ -10,7 +10,7 @@ class Navbar extends StatefulWidget implements PreferredSizeWidget {
   final ValueChanged<String>? onSearchChanged;
 
   const Navbar({
-    super.key, 
+    super.key,
     required this.title,
     this.onSearchChanged,
   });
@@ -25,8 +25,11 @@ class Navbar extends StatefulWidget implements PreferredSizeWidget {
 class _NavbarState extends State<Navbar> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
-  
+
   bool _hasNewNotifications = false;
+
+  // ================= WARNA SENADA DENGAN HALAMAN LAIN (PUTIH) =================
+  static const Color _fgColor = Color(0xFF1E293B);
 
   @override
   void initState() {
@@ -54,7 +57,7 @@ class _NavbarState extends State<Navbar> {
         final decoded = jsonDecode(response.body);
         final List notifications = decoded['data'] ?? [];
 
-        // 🟢 Diperbaiki: Cek apakah ada notifikasi yang 'is_read'-nya bernilai false
+        // Cek apakah ada notifikasi yang 'is_read'-nya bernilai false
         bool hasUnread = notifications.any((notif) => notif['is_read'] == false);
 
         setState(() {
@@ -70,6 +73,14 @@ class _NavbarState extends State<Navbar> {
   Widget build(BuildContext context) {
     return AppBar(
       automaticallyImplyLeading: false,
+      backgroundColor: Colors.white,
+      foregroundColor: _fgColor,
+      elevation: 0,
+      surfaceTintColor: Colors.white,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Container(height: 1, color: Colors.grey.shade200),
+      ),
       leading: _isSearching
           ? IconButton(
               icon: const Icon(Icons.arrow_back),
@@ -93,32 +104,36 @@ class _NavbarState extends State<Navbar> {
           ? TextField(
               controller: _searchController,
               autofocus: true,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
+              style: const TextStyle(color: _fgColor),
+              decoration: InputDecoration(
                 hintText: 'Cari sesuatu...',
-                hintStyle: TextStyle(color: Colors.white70),
+                hintStyle: TextStyle(color: Colors.grey.shade500),
                 border: InputBorder.none,
               ),
               onChanged: widget.onSearchChanged,
             )
-          : Text(widget.title),
+          : Text(
+              widget.title,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
       centerTitle: true,
-      backgroundColor: Colors.blue,
       actions: [
-        IconButton(
-          icon: Icon(_isSearching ? Icons.close : Icons.search),
-          onPressed: () {
-            setState(() {
-              _isSearching = !_isSearching;
-              if (!_isSearching) {
-                _searchController.clear();
-                if (widget.onSearchChanged != null) {
+        // Ikon search cuma muncul kalau halaman ini butuh pencarian
+        // (yaitu kalau onSearchChanged di-pass). Kalau tidak, sembunyikan
+        // total — misalnya di halaman Profil yang memang tidak ada search.
+        if (widget.onSearchChanged != null)
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
                   widget.onSearchChanged!('');
                 }
-              }
-            });
-          },
-        ),
+              });
+            },
+          ),
         if (!_isSearching)
           Stack(
             alignment: Alignment.center,
@@ -134,7 +149,6 @@ class _NavbarState extends State<Navbar> {
                     ),
                   );
                   // Segarkan status titik merah setelah kembali dari halaman notifikasi
-                  // (Karena NotifikasiPage sudah mengubah is_read menjadi true di server)
                   _checkNotificationStatus();
                 },
               ),
@@ -149,7 +163,7 @@ class _NavbarState extends State<Navbar> {
                     decoration: BoxDecoration(
                       color: Colors.red,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.blue, width: 1.5),
+                      border: Border.all(color: Colors.white, width: 1.5),
                     ),
                   ),
                 ),

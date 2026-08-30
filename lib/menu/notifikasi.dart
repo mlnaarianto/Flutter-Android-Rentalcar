@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/widgets/bottom.dart';
 
 class NotifikasiPage extends StatefulWidget {
   const NotifikasiPage({super.key});
@@ -16,6 +15,14 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   List<dynamic> _notifications = [];
   bool _isLoading = true;
   String? _errorMessage;
+
+  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  static const Color _primaryColor = Color(0xFF2563EB);
+  static const Color _accentColor = Color(0xFFF97316);
+  static const Color _bgColor = Color(0xFFF4F6F9);
+  static const Color _successColor = Color(0xFF16A34A);
+  static const Color _dangerColor = Color(0xFFDC2626);
+  static const Color _indigoColor = Color(0xFF6366F1);
 
   @override
   void initState() {
@@ -65,7 +72,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'Terjadi kesalahan koneksi: $e';
+        _errorMessage = 'Terjadi kesalahan koneksi ke server: $e';
         _isLoading = false;
       });
     }
@@ -98,108 +105,287 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   IconData _getNotifIcon(String? type) {
     switch (type) {
       case 'booking':
-        return Icons.bookmark_add;
+        return Icons.bookmark_added_rounded;
       case 'payment':
-        return Icons.payments;
+        return Icons.payments_rounded;
       case 'driver_assignment':
-        return Icons.person_pin;
+        return Icons.person_pin_circle_rounded;
       case 'booking_cancelled':
-        return Icons.cancel;
+        return Icons.cancel_rounded;
       default:
-        return Icons.notifications_active;
+        return Icons.notifications_active_rounded;
     }
   }
 
   Color _getNotifColor(String? type) {
     switch (type) {
       case 'booking':
-        return Colors.blue;
+        return _primaryColor;
       case 'payment':
-        return Colors.green;
+        return _successColor;
       case 'driver_assignment':
-        return Colors.orange;
+        return _accentColor;
       case 'booking_cancelled':
-        return Colors.red;
+        return _dangerColor;
       default:
-        return Colors.indigo;
+        return _indigoColor;
+    }
+  }
+
+  /// Format tanggal jadi lebih ramah dibaca, mis. "29 Agu 2026"
+  String _formatDate(dynamic rawDate) {
+    if (rawDate == null) return '';
+    try {
+      final date = DateTime.parse(rawDate.toString()).toLocal();
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+        'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'
+      ];
+      return '${date.day} ${months[date.month - 1]} ${date.year}';
+    } catch (_) {
+      return rawDate.toString().split('T').first;
+    }
+  }
+
+  String _formatTime(dynamic rawDate) {
+    if (rawDate == null) return '';
+    try {
+      final date = DateTime.parse(rawDate.toString()).toLocal();
+      final hh = date.hour.toString().padLeft(2, '0');
+      final mm = date.minute.toString().padLeft(2, '0');
+      return '$hh:$mm';
+    } catch (_) {
+      return '';
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _bgColor,
       appBar: AppBar(
-        title: const Text('Notifikasi Aktivitas'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        title: const Text(
+          'Notifikasi Aktivitas',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+        ),
+        centerTitle: false,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1E293B),
+        elevation: 0,
+        surfaceTintColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: Colors.grey.shade200),
+        ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: _primaryColor))
           : _errorMessage != null
-              ? Center(child: Text(_errorMessage!))
+              ? _buildErrorState()
               : _notifications.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Belum ada notifikasi kejadian.',
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
-                      ),
-                    )
+                  ? _buildEmptyState()
                   : RefreshIndicator(
+                      color: _primaryColor,
                       onRefresh: _fetchNotifications,
                       child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
                         itemCount: _notifications.length,
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                         itemBuilder: (context, index) {
                           final notif = _notifications[index];
-                          final type = notif['type'];
-                          
-                          // Cek apakah item ini belum dibaca (berdasarkan is_read dari server)
-                          final bool isUnread = notif['is_read'] == false;
-
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            elevation: 2,
-                            // Berikan sedikit perbedaan warna background jika belum dibaca
-                            color: isUnread ? Colors.blue.shade50 : Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: _getNotifColor(type).withOpacity(0.1),
-                                child: Icon(
-                                  _getNotifIcon(type),
-                                  color: _getNotifColor(type),
-                                ),
-                              ),
-                              title: Text(
-                                notif['title'] ?? 'Informasi',
-                                style: TextStyle(
-                                  fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              subtitle: Padding(
-                                padding: const EdgeInsets.only(top: 4.0),
-                                child: Text(
-                                  notif['message'] ?? '',
-                                  style: const TextStyle(fontSize: 12, color: Colors.black87),
-                                ),
-                              ),
-                              trailing: Text(
-                                notif['created_at'] != null
-                                    ? notif['created_at'].toString().split('T')[0]
-                                    : '',
-                                style: const TextStyle(fontSize: 10, color: Colors.grey),
-                              ),
-                            ),
-                          );
+                          return _buildNotifCard(notif);
                         },
                       ),
                     ),
-      bottomNavigationBar: Bottom(
-        currentIndex: 3, 
-        onTap: (index) {},
+    );
+  }
+
+  /// ================= STATE: ERROR =================
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: _dangerColor.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.error_outline_rounded,
+                  size: 40, color: _dangerColor),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _fetchNotifications,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Coba Lagi'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryColor,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ================= STATE: EMPTY =================
+  Widget _buildEmptyState() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: _primaryColor.withOpacity(0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.notifications_off_outlined,
+                        size: 40, color: _primaryColor.withOpacity(0.6)),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Belum ada notifikasi kejadian.',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Aktivitas terbaru seputar pesanan Anda akan\nmuncul di sini.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// ================= KARTU NOTIFIKASI =================
+  Widget _buildNotifCard(dynamic notif) {
+    final String? type = notif['type'];
+    final Color notifColor = _getNotifColor(type);
+    final bool isUnread = notif['is_read'] == false;
+    final String createdAt = notif['created_at']?.toString() ?? '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: isUnread ? _primaryColor.withOpacity(0.045) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: isUnread
+            ? Border.all(color: _primaryColor.withOpacity(0.15))
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: notifColor.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(_getNotifIcon(type), color: notifColor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          notif['title'] ?? 'Informasi',
+                          style: TextStyle(
+                            fontWeight:
+                                isUnread ? FontWeight.bold : FontWeight.w600,
+                            fontSize: 13.5,
+                            color: const Color(0xFF1E293B),
+                          ),
+                        ),
+                      ),
+                      if (isUnread) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: const EdgeInsets.only(top: 4),
+                          decoration: const BoxDecoration(
+                            color: _accentColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    notif['message'] ?? '',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.schedule_rounded,
+                          size: 11.5, color: Colors.grey.shade400),
+                      const SizedBox(width: 3),
+                      Text(
+                        [
+                          _formatDate(createdAt),
+                          if (_formatTime(createdAt).isNotEmpty)
+                            _formatTime(createdAt),
+                        ].where((e) => e.isNotEmpty).join(' • '),
+                        style: TextStyle(
+                            fontSize: 10.5, color: Colors.grey.shade500),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

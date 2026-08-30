@@ -23,6 +23,11 @@ class _DashboardState extends State<Dashboard> {
   String _userRole = '';
   String _searchQuery = '';
 
+  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  static const Color _primaryColor = Color(0xFF2563EB);
+  static const Color _accentColor = Color(0xFFF97316);
+  static const Color _bgColor = Color(0xFFF4F6F9);
+
   @override
   void initState() {
     super.initState();
@@ -34,7 +39,9 @@ class _DashboardState extends State<Dashboard> {
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _userName = prefs.getString('user_name') ?? prefs.getString('email')?.split('@')[0] ?? 'Pengguna';
+      _userName = prefs.getString('user_name') ??
+          prefs.getString('email')?.split('@')[0] ??
+          'Pengguna';
       _userRole = prefs.getString('role') ?? AppRole.penyewa.value;
     });
   }
@@ -96,7 +103,52 @@ class _DashboardState extends State<Dashboard> {
       return imagePath;
     }
     final serverRoot = ApiConfig.baseUrl.replaceAll('/api', '');
-    return imagePath.startsWith('/') ? '$serverRoot$imagePath' : '$serverRoot/storage/$imagePath';
+    return imagePath.startsWith('/')
+        ? '$serverRoot$imagePath'
+        : '$serverRoot/storage/$imagePath';
+  }
+
+  /// Format angka harga jadi "Rp 1.200.000" biar konsisten dgn halaman detail
+  String _formatPrice(dynamic raw) {
+    if (raw == null) return 'Rp 0';
+    final numValue = num.tryParse(raw.toString()) ?? 0;
+    final intValue = numValue.round();
+    final str = intValue.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      final posFromRight = str.length - i;
+      buffer.write(str[i]);
+      if (posFromRight > 1 && posFromRight % 3 == 1) {
+        buffer.write('.');
+      }
+    }
+    return 'Rp $buffer';
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'tersedia':
+        return const Color(0xFF16A34A);
+      case 'disewa':
+        return _accentColor;
+      case 'perbaikan':
+        return const Color(0xFFDC2626);
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'tersedia':
+        return 'Tersedia';
+      case 'disewa':
+        return 'Disewa';
+      case 'perbaikan':
+        return 'Perbaikan';
+      default:
+        return status.isEmpty ? '-' : status;
+    }
   }
 
   @override
@@ -107,164 +159,349 @@ class _DashboardState extends State<Dashboard> {
       onTap: (index) {},
       appBarSearchCallback: _filterCars,
       content: RefreshIndicator(
+        color: _primaryColor,
         onRefresh: _fetchDashboardCars,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Header Banner Selamat Datang dengan Nama Sesi Aktif
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Colors.blue, Colors.blueAccent],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+              _buildWelcomeBanner(),
+              const SizedBox(height: 22),
+              _buildSectionHeader(),
+              const SizedBox(height: 14),
+              if (_searchQuery.isNotEmpty) _buildSearchIndicator(),
+              _buildCarList(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ================= BANNER SELAMAT DATANG =================
+  Widget _buildWelcomeBanner() {
+    final bool isOwner = _userRole == AppRole.perental.value;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [_primaryColor, Color(0xFF3B82F6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: _primaryColor.withOpacity(0.25),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Halo, $_userName! 👋',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold,
                   ),
-                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 6),
+                Text(
+                  isOwner
+                      ? 'Kelola armada rental mobil Anda dengan mudah di sini.'
+                      : 'Temukan mobil impian untuk perjalanan nyaman Anda hari ini.',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: 12.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isOwner
+                  ? Icons.directions_car_filled_rounded
+                  : Icons.travel_explore_rounded,
+              color: Colors.white,
+              size: 26,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ================= LABEL BAGIAN + JUMLAH UNIT =================
+  Widget _buildSectionHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        const Text(
+          'Daftar Mobil Tersedia',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: _primaryColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            '${_filteredCars.length} Unit',
+            style: const TextStyle(
+              fontSize: 12,
+              color: _primaryColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSearchIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 4),
+      child: Row(
+        children: [
+          Icon(Icons.search_rounded, size: 14, color: Colors.grey.shade500),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Hasil pencarian untuk: "$_searchQuery"',
+              style: TextStyle(
+                fontStyle: FontStyle.italic,
+                color: Colors.grey.shade600,
+                fontSize: 12.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ================= LIST MOBIL =================
+  Widget _buildCarList() {
+    if (_isLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(48.0),
+          child: CircularProgressIndicator(color: _primaryColor),
+        ),
+      );
+    }
+
+    if (_filteredCars.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40.0),
+          child: Column(
+            children: [
+              Icon(Icons.search_off_rounded,
+                  size: 44, color: Colors.grey.shade400),
+              const SizedBox(height: 12),
+              Text(
+                _searchQuery.isNotEmpty
+                    ? 'Tidak ada mobil yang cocok dengan pencarianmu.'
+                    : 'Belum ada mobil yang tersedia.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _filteredCars.length,
+      itemBuilder: (context, index) {
+        final car = _filteredCars[index];
+        return _buildCarCard(car);
+      },
+    );
+  }
+
+  /// ================= KARTU MOBIL =================
+  Widget _buildCarCard(dynamic car) {
+    final imageUrl = _getImageUrl(car['image']);
+    final String status = car['status'] ?? '';
+    final statusColor = _statusColor(status);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CarDetailPage(carId: car['id']),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
                   children: [
-                    Text(
-                      'Halo, $_userName! 👋',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: imageUrl.isNotEmpty
+                          ? Image.network(
+                              imageUrl,
+                              width: 84,
+                              height: 84,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  _buildPlaceholder(),
+                            )
+                          : _buildPlaceholder(),
+                    ),
+                    if (status.isNotEmpty)
+                      Positioned(
+                        left: 4,
+                        bottom: 4,
+                        child: Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: statusColor,
+                            shape: BoxShape.circle,
+                            border:
+                                Border.all(color: Colors.white, width: 1.6),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      // 👇 Menggunakan AppRole.perental.value agar bersih dari hardcode string
-                      _userRole == AppRole.perental.value
-                          ? 'Kelola armada rental mobil Anda dengan mudah di sini.'
-                          : 'Temukan mobil impian untuk perjalanan nyaman Anda hari ini.',
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 20),
-
-              // 2. Label Bagian
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Daftar Mobil Tersedia',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    '${_filteredCars.length} Unit',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              // Indikator teks pencarian aktif
-              if (_searchQuery.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12.0),
-                  child: Text(
-                    'Hasil pencarian untuk: "$_searchQuery"',
-                    style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey, fontSize: 13),
-                  ),
-                ),
-
-              // 3. List / Grid Konten Mobil
-              _isLoading
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(40.0),
-                        child: CircularProgressIndicator(),
-                      ),
-                    )
-                  : _filteredCars.isEmpty
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(40.0),
-                            child: Text('Tidak ada mobil yang ditemukan.', style: TextStyle(color: Colors.grey)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              (car['brand'] ?? '').toString().toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: Colors.grey.shade500,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
                           ),
-                        )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _filteredCars.length,
-                          itemBuilder: (context, index) {
-                            final car = _filteredCars[index];
-                            final imageUrl = _getImageUrl(car['image']);
-
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              elevation: 2,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => CarDetailPage(carId: car['id']),
-                                    ),
-                                  );
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Row(
-                                    children: [
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: imageUrl.isNotEmpty
-                                            ? Image.network(
-                                                imageUrl,
-                                                width: 80,
-                                                height: 80,
-                                                fit: BoxFit.cover,
-                                                errorBuilder: (context, error, stackTrace) =>
-                                                    _buildPlaceholder(),
-                                              )
-                                            : _buildPlaceholder(),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              car['brand']?.toUpperCase() ?? '',
-                                              style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              car['name'] ?? 'Mobil Rental',
-                                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              'Rp ${car['price_per_day']} / hari',
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                                color: Colors.blue,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                                    ],
-                                  ),
+                          if (status.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                _statusLabel(status),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: statusColor,
                                 ),
                               ),
-                            );
-                          },
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        car['name'] ?? 'Mobil Rental',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E293B),
                         ),
-            ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.event_seat_outlined,
+                              size: 13, color: Colors.grey.shade400),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${car['seats'] ?? '-'} Kursi',
+                            style: TextStyle(
+                                fontSize: 11.5, color: Colors.grey.shade600),
+                          ),
+                          const SizedBox(width: 10),
+                          Icon(Icons.calendar_today_outlined,
+                              size: 12, color: Colors.grey.shade400),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${car['year'] ?? '-'}',
+                            style: TextStyle(
+                                fontSize: 11.5, color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${_formatPrice(car['price_per_day'])} / hari',
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          color: _primaryColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.arrow_forward_ios_rounded,
+                    size: 13, color: Colors.grey.shade400),
+              ],
+            ),
           ),
         ),
       ),
@@ -273,10 +510,11 @@ class _DashboardState extends State<Dashboard> {
 
   Widget _buildPlaceholder() {
     return Container(
-      width: 80,
-      height: 80,
-      color: Colors.grey.shade200,
-      child: const Icon(Icons.directions_car, color: Colors.grey),
+      width: 84,
+      height: 84,
+      color: _bgColor,
+      child: Icon(Icons.directions_car_rounded,
+          color: Colors.grey.shade400, size: 30),
     );
   }
 }

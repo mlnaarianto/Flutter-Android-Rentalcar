@@ -21,6 +21,12 @@ class _LoginPageState extends State<LoginPage> {
   static const String _serverClientId =
       '1055921517849-kd3ps2tleptf1tmpqqadvnb9f64m7tpr.apps.googleusercontent.com';
 
+  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  static const Color _primaryColor = Color(0xFF2563EB);
+  static const Color _accentColor = Color(0xFFF97316);
+  static const Color _bgColor = Color(0xFFF4F6F9);
+  static const Color _dangerColor = Color(0xFFDC2626);
+
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
 
@@ -56,7 +62,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       debugPrint('Mengirim ke Laravel: ${ApiConfig.googleLogin}');
-      
+
       // Hit API Backend Laravel
       final response = await http
           .post(
@@ -78,7 +84,7 @@ class _LoginPageState extends State<LoginPage> {
           );
 
       debugPrint('Status code: ${response.statusCode}');
-      
+
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['status'] == 'success') {
@@ -96,7 +102,7 @@ class _LoginPageState extends State<LoginPage> {
 
           await prefs.setString('user_name', userData['name'] ?? '');
           await prefs.setString('user_email', userData['email'] ?? '');
-          
+
           if (userData['avatar'] != null) {
             await prefs.setString('avatar_url', userData['avatar']);
           }
@@ -105,9 +111,9 @@ class _LoginPageState extends State<LoginPage> {
           if (userData['roles'] != null) {
             List<dynamic> rawRoles = userData['roles'];
             List<String> rolesList = rawRoles.map((e) => e.toString()).toList();
-            
+
             await prefs.setStringList('user_roles', rolesList);
-            
+
             if (rolesList.isNotEmpty) {
               await prefs.setString('role', rolesList.first);
             }
@@ -117,7 +123,7 @@ class _LoginPageState extends State<LoginPage> {
           if (userData['permissions'] != null) {
             List<dynamic> rawPermissions = userData['permissions'];
             List<String> permissionsList = rawPermissions.map((e) => e.toString()).toList();
-            
+
             await prefs.setStringList('user_permissions', permissionsList);
           }
         }
@@ -139,68 +145,222 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       debugPrint('❌ Error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: Colors.red.shade700,
-            duration: const Duration(seconds: 6),
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
-          ),
-        );
+        _showSnackBar(e.toString().replaceFirst('Exception: ', ''));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: _dangerColor,
+        duration: const Duration(seconds: 6),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
+        action: SnackBarAction(
+          label: 'OK',
+          textColor: Colors.white,
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Login'), centerTitle: true),
-      body: Center(
+      backgroundColor: _bgColor,
+      body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const FlutterLogo(size: 80),
-              const SizedBox(height: 40),
+              const Spacer(flex: 3),
+              _buildLogo(),
+              const SizedBox(height: 28),
               const Text(
-                'Rental Car',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                'Selamat Datang',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1E293B),
+                ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Masuk dengan akun Google kamu',
-                style: TextStyle(color: Colors.grey.shade600),
+                'Masuk untuk mulai menyewa mobil\nimpianmu dengan mudah',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.grey.shade500,
+                  fontSize: 13.5,
+                  height: 1.5,
+                ),
               ),
-              const SizedBox(height: 40),
-
-              // ── Tombol Sign in with Google ──
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : OutlinedButton.icon(
-                        onPressed: _signInWithGoogle,
-                        icon: const Icon(Icons.login),
-                        label: const Text('Sign in with Google'),
-                        style: OutlinedButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
+              const Spacer(flex: 3),
+              _buildFeatureRow(),
+              const SizedBox(height: 28),
+              _buildGoogleButton(),
+              const SizedBox(height: 20),
+              Text(
+                'Dengan masuk, kamu menyetujui Syarat & Ketentuan\nserta Kebijakan Privasi kami',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade400, fontSize: 11, height: 1.5),
               ),
+              const SizedBox(height: 24),
             ],
           ),
         ),
       ),
     );
   }
+
+  Widget _buildLogo() {
+    return Container(
+      width: 88,
+      height: 88,
+      decoration: BoxDecoration(
+        color: _primaryColor.withOpacity(0.1),
+        shape: BoxShape.circle,
+      ),
+      child: const Icon(
+        Icons.directions_car_filled_rounded,
+        size: 44,
+        color: _primaryColor,
+      ),
+    );
+  }
+
+  Widget _buildFeatureRow() {
+    final items = [
+      (Icons.verified_user_outlined, 'Aman'),
+      (Icons.flash_on_outlined, 'Cepat'),
+      (Icons.support_agent_outlined, '24/7'),
+    ];
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: items
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Icon(item.$1, size: 20, color: _accentColor),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    item.$2,
+                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500),
+                  ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildGoogleButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _signInWithGoogle,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: const Color(0xFF1E293B),
+          elevation: 0,
+          side: BorderSide(color: Colors.grey.shade200),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                height: 22,
+                width: 22,
+                child: CircularProgressIndicator(
+                  color: _primaryColor,
+                  strokeWidth: 2.4,
+                ),
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildGoogleIcon(),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Masuk dengan Google',
+                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  /// "G" multi-warna sederhana tanpa perlu aset gambar
+  Widget _buildGoogleIcon() {
+    return SizedBox(
+      width: 20,
+      height: 20,
+      child: CustomPaint(painter: _GoogleGPainter()),
+    );
+  }
+}
+
+class _GoogleGPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double r = size.width / 2;
+    final Offset center = Offset(size.width / 2, size.height / 2);
+    final double strokeWidth = size.width * 0.22;
+
+    final colors = <Color, List<double>>{
+      const Color(0xFF4285F4): [-45, 90], // biru: kanan atas
+      const Color(0xFF34A853): [45, 90], // hijau: kanan bawah
+      const Color(0xFFFBBC05): [135, 70], // kuning: kiri bawah
+      const Color(0xFFEA4335): [205, 85], // merah: kiri atas
+    };
+
+    colors.forEach((color, angles) {
+      final paint = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(
+        Rect.fromCircle(radius: r - strokeWidth / 2, center: center),
+        angles[0] * 3.14159 / 180,
+        angles[1] * 3.14159 / 180,
+        false,
+        paint,
+      );
+    });
+
+    // Bar horizontal biru khas logo "G"
+    final barPaint = Paint()..color = const Color(0xFF4285F4);
+    canvas.drawRect(
+      Rect.fromLTWH(center.dx, center.dy - strokeWidth / 2, r - strokeWidth * 0.2, strokeWidth),
+      barPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

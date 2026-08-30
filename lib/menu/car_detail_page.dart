@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart'; 
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/menu/booking_form_page.dart'; 
+import 'package:rentalcar/menu/booking_form_page.dart';
 
 class CarDetailPage extends StatefulWidget {
   final int carId;
@@ -20,9 +22,20 @@ class _CarDetailPageState extends State<CarDetailPage> {
   Map<String, dynamic>? _car;
   bool _isLoading = true;
   String? _errorMessage;
-  
-  // Controller untuk Youtube Player Flutter
+
+  // Controller video generik (untuk file mp4 / link langsung)
+  VideoPlayerController? _videoController;
+  ChewieController? _chewieController;
+  bool _isVideoLoading = false;
+  String? _videoError;
+
+  // Controller khusus kalau video_url ternyata link YouTube
   YoutubePlayerController? _youtubeController;
+  bool _isYoutubeVideo = false;
+
+  static const Color _primaryColor = Color(0xFF2563EB);
+  static const Color _accentColor = Color(0xFFF97316);
+  static const Color _bgColor = Color(0xFFF4F6F9);
 
   @override
   void initState() {
@@ -59,20 +72,21 @@ class _CarDetailPageState extends State<CarDetailPage> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final carData = data['data'];
-        
-        // Ambil dan ekstrak Video ID untuk youtube_player_flutter
-        String? videoUrl = carData['video_url'];
+
+        // Ambil video_url dan tentukan jenis player yang dipakai
+        final String? videoUrl = carData['video_url'];
         if (videoUrl != null && videoUrl.isNotEmpty) {
-          String? videoId = YoutubePlayer.convertUrlToId(videoUrl);
-          if (videoId != null) {
-            _youtubeController = YoutubePlayerController(
-              initialVideoId: videoId,
-              flags: const YoutubePlayerFlags(
-                autoPlay: false,
-                mute: false,
-                enableCaption: true,
-              ),
+          final youtubeId = _extractYoutubeId(videoUrl);
+          if (youtubeId != null) {
+            _isYoutubeVideo = true;
+            _youtubeController = YoutubePlayerController.fromVideoId(
+              videoId: youtubeId,
+              autoPlay: false,
+              params: const YoutubePlayerParams(showFullscreenButton: true),
             );
+          } else {
+            _isYoutubeVideo = false;
+            _initVideoPlayer(videoUrl);
           }
         }
 
@@ -82,7 +96,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
         });
       } else {
         setState(() {
-          _errorMessage = 'Gagal memuat detail mobil (Kode: ${response.statusCode})';
+          _errorMessage =
+              'Gagal memuat detail mobil (Kode: ${response.statusCode})';
           _isLoading = false;
         });
       }
@@ -94,9 +109,81 @@ class _CarDetailPageState extends State<CarDetailPage> {
     }
   }
 
+  Future<void> _initVideoPlayer(String rawUrl) async {
+    setState(() {
+      _isVideoLoading = true;
+      _videoError = null;
+    });
+
+    try {
+      final url = _resolveVideoUrl(rawUrl);
+
+      final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      await controller.initialize();
+
+      final chewie = ChewieController(
+        videoPlayerController: controller,
+        autoPlay: false,
+        looping: false,
+        aspectRatio: controller.value.aspectRatio == 0
+            ? 16 / 9
+            : controller.value.aspectRatio,
+        materialProgressColors: ChewieProgressColors(
+          playedColor: _primaryColor,
+          handleColor: _primaryColor,
+          bufferedColor: _primaryColor.withOpacity(0.15),
+          backgroundColor: Colors.grey.shade300,
+        ),
+      );
+
+      setState(() {
+        _videoController = controller;
+        _chewieController = chewie;
+        _isVideoLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _videoError = 'Video tidak dapat dimuat: $e';
+        _isVideoLoading = false;
+      });
+    }
+  }
+
+  /// Mendeteksi apakah url adalah link YouTube dan mengambil video ID-nya.
+  /// Mendukung format: youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID
+  /// Return null kalau bukan link YouTube (berarti diperlakukan sebagai file video biasa).
+  String? _extractYoutubeId(String url) {
+    final patterns = [
+      RegExp(r'youtu\.be/([a-zA-Z0-9_-]{11})'),
+      RegExp(r'youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})'),
+      RegExp(r'youtube\.com/shorts/([a-zA-Z0-9_-]{11})'),
+      RegExp(r'youtube\.com/embed/([a-zA-Z0-9_-]{11})'),
+    ];
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(url);
+      if (match != null) return match.group(1);
+    }
+    return null;
+  }
+
+  /// Mengubah beberapa format link umum (mis. Google Drive share link)
+  /// menjadi direct-link yang bisa di-stream video_player.
+  /// Kalau link sudah berupa direct video URL (.mp4, dll), dikembalikan apa adanya.
+  String _resolveVideoUrl(String url) {
+    final driveMatch =
+        RegExp(r'drive\.google\.com/file/d/([^/]+)').firstMatch(url);
+    if (driveMatch != null) {
+      final fileId = driveMatch.group(1);
+      return 'https://drive.google.com/uc?export=download&id=$fileId';
+    }
+    return url;
+  }
+
   @override
   void dispose() {
-    _youtubeController?.dispose(); 
+    _chewieController?.dispose();
+    _videoController?.dispose();
+    _youtubeController?.close();
     super.dispose();
   }
 
@@ -116,221 +203,706 @@ class _CarDetailPageState extends State<CarDetailPage> {
   Color _getStatusColor(String status) {
     switch (status) {
       case 'tersedia':
-        return Colors.green;
+        return const Color(0xFF16A34A);
       case 'disewa':
-        return Colors.orange;
+        return _accentColor;
       case 'perbaikan':
-        return Colors.red;
+        return const Color(0xFFDC2626);
       default:
         return Colors.grey;
     }
   }
 
+  /// Format angka harga jadi "Rp 1.200.000" (buang desimal ".00", kasih titik ribuan)
+  /// supaya nggak wrap/kepotong di kartu harga yang sempit.
+  String _formatPrice(dynamic raw) {
+    if (raw == null) return 'Rp 0';
+    final numValue = num.tryParse(raw.toString()) ?? 0;
+    final intValue = numValue.round();
+    final str = intValue.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      final posFromRight = str.length - i;
+      buffer.write(str[i]);
+      if (posFromRight > 1 && posFromRight % 3 == 1) {
+        buffer.write('.');
+      }
+    }
+    return 'Rp $buffer';
+  }
+
+  String _getStatusLabel(String status) {
+    switch (status) {
+      case 'tersedia':
+        return 'Tersedia';
+      case 'disewa':
+        return 'Disewa';
+      case 'perbaikan':
+        return 'Perbaikan';
+      default:
+        return status.isEmpty ? '-' : status;
+    }
+  }
+
+  /// ================= HELPER UI: SECTION CARD (selaras dgn ProfilPage) =================
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    required Color iconColor,
+    String? subtitle,
+    required List<Widget> children,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    if (subtitle != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          subtitle,
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _infoTile(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: _primaryColor.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, size: 16, color: _primaryColor),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  value.isEmpty ? '-' : value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _specChip(IconData icon, String label, String value) {
+    return Container(
+      width: (MediaQuery.of(context).size.width - 32 - 18 * 2 - 10) / 2,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _bgColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _accentColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: _accentColor),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  value.isEmpty ? '-' : value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ownerData = _car?['user'] ?? _car?['owner'];
-    final ownerName = ownerData != null ? (ownerData['name'] ?? 'Tidak diketahui') : 'Administrator / Perental';
+    final ownerName = ownerData != null
+        ? (ownerData['name'] ?? 'Tidak diketahui')
+        : 'Administrator / Perental';
     final ownerEmail = ownerData != null ? (ownerData['email'] ?? '-') : '';
 
     final personalData = ownerData != null ? ownerData['personal_data'] : null;
     final ownerPhone = personalData != null ? (personalData['phone'] ?? '-') : '-';
-    final ownerAddress = personalData != null ? (personalData['address'] ?? '-') : '-';
+    final ownerAddress =
+        personalData != null ? (personalData['address'] ?? '-') : '-';
 
     final status = _car?['status'] ?? '';
     final driverPrice = _car?['driver_price_per_day'] ?? 0;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detail Mobil'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-      ),
+      backgroundColor: _bgColor,
+      extendBodyBehindAppBar: true,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(_errorMessage!, textAlign: TextAlign.center),
-                  ),
-                )
+              ? _buildErrorState()
               : _car == null
-                  ? const Center(child: Text('Data mobil tidak ditemukan.'))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: _car!['image'] != null && _car!['image'].toString().isNotEmpty
-                                ? Image.network(
-                                    _getImageUrl(_car!['image']),
-                                    width: double.infinity,
-                                    height: 220,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) =>
-                                        _buildPlaceholderImage(),
-                                  )
-                                : _buildPlaceholderImage(),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                (_car!['brand'] ?? '').toUpperCase(),
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: _getStatusColor(status).withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: _getStatusColor(status)),
-                                ),
-                                child: Text(
-                                  status.toUpperCase(),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: _getStatusColor(status),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _car!['name'] ?? 'Tanpa Nama',
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Rp ${_car!['price_per_day']} / hari',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Tarif Jasa Driver: Rp $driverPrice / hari',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.indigo,
-                            ),
-                          ),
-                          const Divider(height: 24),
-                          
-                          // Informasi Pemilik / Perental
-                          const Text(
-                            'Informasi Pemilik / Perental',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 8),
-                          _buildInfoRow(Icons.person, 'Nama Pengelola', ownerName),
-                          if (ownerEmail.isNotEmpty)
-                            _buildInfoRow(Icons.email, 'Email', ownerEmail),
-                          _buildInfoRow(Icons.phone, 'Nomor HP', ownerPhone),
-                          _buildInfoRow(Icons.location_on, 'Alamat', ownerAddress),
-                          
-                          const Divider(height: 24),
-                          const Text(
-                            'Spesifikasi Kendaraan',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 8),
-                          _buildInfoRow(Icons.confirmation_number, 'Plat Nomor', _car!['plate_number']),
-                          _buildInfoRow(Icons.settings, 'Tipe Mesin', _car!['engine_type']),
-                          if (_car!['fuel_spec'] != null && _car!['fuel_spec'].toString().isNotEmpty)
-                            _buildInfoRow(Icons.local_gas_station, 'Spesifikasi BBM', _car!['fuel_spec']),
-                          _buildInfoRow(Icons.airline_seat_recline_normal, 'Kapasitas Kursi', '${_car!['seats']} Kursi'),
-                          _buildInfoRow(Icons.calendar_today, 'Tahun Pembuatan', '${_car!['year']}'),
-                          const SizedBox(height: 16),
-                          
-                          // Tampilkan Video Player Flutter jika controller tersedia
-                          if (_youtubeController != null) ...[
-                            const Text(
-                              'Video Review Kendaraan',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: YoutubePlayer(
-                                controller: _youtubeController!,
-                                showVideoProgressIndicator: true,
-                                progressIndicatorColor: Colors.blue,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                          ],
-
-                          const Text(
-                            'Deskripsi',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _car!['description'] ?? 'Tidak ada deskripsi tambahan.',
-                            style: const TextStyle(color: Colors.black87, height: 1.4),
-                          ),
-                          const SizedBox(height: 30),
-                        ],
-                      ),
-                    ),
-      bottomNavigationBar: _isLoading || _car == null
+                  ? _buildEmptyState()
+                  : _buildContent(status, driverPrice, ownerName, ownerEmail,
+                      ownerPhone, ownerAddress),
+      bottomNavigationBar: _isLoading || _car == null || _errorMessage != null
           ? null
-          : Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.white,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: status == 'tersedia' ? Colors.blue : Colors.grey,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                onPressed: status == 'tersedia'
-                    ? () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BookingFormPage(car: _car!),
-                          ),
-                        );
-                      }
-                    : null,
-                child: Text(
-                  status == 'tersedia' ? 'Sewa Mobil Ini' : 'Mobil Sedang Tidak Tersedia',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
+          : _buildBottomBar(status),
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
+  /// ================= STATE: ERROR =================
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.error_outline_rounded, size: 40, color: Colors.red),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _fetchCarDetail,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Coba Lagi'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ================= STATE: EMPTY =================
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.directions_car_outlined, size: 48, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          const Text('Data mobil tidak ditemukan.'),
+        ],
+      ),
+    );
+  }
+
+  /// ================= HEADER (GAMBAR + APPBAR MELAYANG) =================
+  Widget _buildHeaderImage() {
+    final hasImage = _car!['image'] != null && _car!['image'].toString().isNotEmpty;
+    return SizedBox(
+      height: 300,
+      width: double.infinity,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          hasImage
+              ? Image.network(
+                  _getImageUrl(_car!['image']),
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
+                )
+              : _buildPlaceholderImage(),
+          // Gradient supaya tombol back & chip status tetap terbaca
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.45),
+                  Colors.transparent,
+                  Colors.black.withOpacity(0.55),
+                ],
+                stops: const [0.0, 0.45, 1.0],
+              ),
+            ),
+          ),
+          // Tombol back melayang
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 16,
+            child: Material(
+              color: Colors.black.withOpacity(0.35),
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => Navigator.pop(context),
+                child: const Padding(
+                  padding: EdgeInsets.all(9),
+                  child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+          ),
+          // Nama & brand mobil di atas gambar
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 20,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  (_car!['brand'] ?? '').toString().toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.1,
+                    color: Colors.white.withOpacity(0.85),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _car!['name'] ?? 'Tanpa Nama',
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ================= KARTU HARGA (MENGAMBANG DI BAWAH HEADER) =================
+  Widget _buildPriceCard(String status, dynamic driverPrice) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: Colors.blue),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 110,
-            child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.w500)),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Harga Sewa / Hari',
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                    ),
+                    const SizedBox(height: 3),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _formatPrice(_car!['price_per_day']),
+                        maxLines: 1,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: _primaryColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 14),
+                width: 1,
+                height: 34,
+                color: Colors.grey.shade200,
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Jasa Driver / Hari',
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                    ),
+                    const SizedBox(height: 3),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _formatPrice(driverPrice),
+                        maxLines: 1,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: _accentColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          Expanded(child: Text(value, style: const TextStyle(color: Colors.black87))),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: _getStatusColor(status).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _getStatusColor(status).withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(status),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  _getStatusLabel(status),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: _getStatusColor(status),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  /// ================= KONTEN UTAMA =================
+  Widget _buildContent(String status, dynamic driverPrice, String ownerName,
+      String ownerEmail, String ownerPhone, String ownerAddress) {
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _buildHeaderImage()),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: _buildPriceCard(status, driverPrice),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          sliver: SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ============ PEMILIK / PERENTAL ============
+                _sectionCard(
+                  title: 'Pemilik / Perental',
+                  subtitle: 'Kontak yang bertanggung jawab atas kendaraan ini',
+                  icon: Icons.person_pin_circle_rounded,
+                  iconColor: _primaryColor,
+                  children: [
+                    _infoTile(Icons.person_outline, 'Nama Pengelola', ownerName),
+                    if (ownerEmail.isNotEmpty)
+                      _infoTile(Icons.email_outlined, 'Email', ownerEmail),
+                    _infoTile(Icons.phone_outlined, 'Nomor HP', ownerPhone),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 0),
+                      child: _infoTile(Icons.location_on_outlined, 'Alamat', ownerAddress),
+                    ),
+                  ],
+                ),
+
+                // ============ SPESIFIKASI ============
+                _sectionCard(
+                  title: 'Spesifikasi Kendaraan',
+                  subtitle: 'Detail teknis kendaraan yang akan disewa',
+                  icon: Icons.build_circle_outlined,
+                  iconColor: _accentColor,
+                  children: [
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _specChip(Icons.confirmation_number_outlined, 'Plat Nomor',
+                            '${_car!['plate_number'] ?? '-'}'),
+                        _specChip(Icons.settings_outlined, 'Tipe Mesin',
+                            '${_car!['engine_type'] ?? '-'}'),
+                        if (_car!['fuel_spec'] != null &&
+                            _car!['fuel_spec'].toString().isNotEmpty)
+                          _specChip(Icons.local_gas_station_outlined,
+                              'Spesifikasi BBM', '${_car!['fuel_spec']}'),
+                        _specChip(Icons.airline_seat_recline_normal_outlined,
+                            'Kapasitas Kursi', '${_car!['seats'] ?? '-'} Kursi'),
+                        _specChip(Icons.calendar_today_outlined,
+                            'Tahun Pembuatan', '${_car!['year'] ?? '-'}'),
+                      ],
+                    ),
+                  ],
+                ),
+
+                // ============ VIDEO ============
+                if (_isYoutubeVideo || _isVideoLoading || _videoError != null || _chewieController != null)
+                  _sectionCard(
+                    title: 'Video Review Kendaraan',
+                    subtitle: 'Lihat lebih dekat kondisi kendaraan sebelum menyewa',
+                    icon: Icons.play_circle_outline_rounded,
+                    iconColor: _primaryColor,
+                    children: [_buildVideoSection()],
+                  ),
+
+                // ============ DESKRIPSI ============
+                _sectionCard(
+                  title: 'Deskripsi',
+                  icon: Icons.description_outlined,
+                  iconColor: _accentColor,
+                  children: [
+                    Text(
+                      _car!['description'] ?? 'Tidak ada deskripsi tambahan.',
+                      style: TextStyle(
+                        color: Colors.grey.shade700,
+                        height: 1.5,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// ================= VIDEO SECTION (isi dari card, sudah dibungkus rounded) =================
+  Widget _buildVideoSection() {
+    if (_isYoutubeVideo && _youtubeController != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: YoutubePlayer(controller: _youtubeController!),
+        ),
+      );
+    }
+
+    if (_isVideoLoading) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          decoration: BoxDecoration(
+            color: _bgColor,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(strokeWidth: 2.6),
+                ),
+                const SizedBox(height: 10),
+                Text('Memuat video...', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_videoError != null) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.red.withOpacity(0.15)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: Colors.red, size: 26),
+                  const SizedBox(height: 8),
+                  Text(
+                    _videoError!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_chewieController != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: _chewieController!.videoPlayerController.value.aspectRatio,
+          child: Chewie(controller: _chewieController!),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  /// ================= BOTTOM BAR (STICKY) =================
+  Widget _buildBottomBar(String status) {
+    final bool available = status == 'tersedia';
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: available ? _primaryColor : Colors.grey.shade400,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: available
+              ? () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => BookingFormPage(car: _car!),
+                    ),
+                  );
+                }
+              : null,
+          icon: Icon(available ? Icons.directions_car_filled_rounded : Icons.block_rounded, size: 20),
+          label: Text(
+            available ? 'Sewa Mobil Ini' : 'Mobil Sedang Tidak Tersedia',
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+          ),
+        ),
       ),
     );
   }
@@ -338,9 +910,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
   Widget _buildPlaceholderImage() {
     return Container(
       width: double.infinity,
-      height: 220,
-      color: Colors.grey.shade200,
-      child: const Icon(Icons.car_rental, size: 60, color: Colors.grey),
+      height: 300,
+      color: Colors.grey.shade300,
+      child: const Icon(Icons.directions_car_rounded, size: 64, color: Colors.white),
     );
   }
 }

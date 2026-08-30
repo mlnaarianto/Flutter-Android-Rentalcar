@@ -6,7 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/menu/profil.dart'; 
+import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums agar konsisten
 
 class CarAddPage extends StatefulWidget {
@@ -31,7 +31,7 @@ class _CarAddPageState extends State<CarAddPage> {
   final TextEditingController _driverPriceController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _fuelSpecController = TextEditingController();
-  final TextEditingController _videoUrlController = TextEditingController(); 
+  final TextEditingController _videoUrlController = TextEditingController();
 
   // Nilai Default Dropdown
   String _engineType = 'Bensin (Gasoline)';
@@ -50,6 +50,11 @@ class _CarAddPageState extends State<CarAddPage> {
   bool _isLoading = false;
   bool get _isEditMode => widget.carData != null;
 
+  // ================= WARNA SENADA DENGAN CarDetailPage =================
+  static const Color _primaryColor = Color(0xFF2563EB);
+  static const Color _accentColor = Color(0xFFF97316);
+  static const Color _bgColor = Color(0xFFF4F6F9);
+
   @override
   void initState() {
     super.initState();
@@ -61,16 +66,19 @@ class _CarAddPageState extends State<CarAddPage> {
       _seatsController.text = car['seats']?.toString() ?? '';
       _yearController.text = car['year']?.toString() ?? '';
       _priceController.text = car['price_per_day']?.toString() ?? '';
-      _driverPriceController.text = car['driver_price_per_day']?.toString() ?? '';
+      _driverPriceController.text =
+          car['driver_price_per_day']?.toString() ?? '';
       _descController.text = car['description'] ?? '';
       _fuelSpecController.text = car['fuel_spec'] ?? '';
-      _videoUrlController.text = car['video_url'] ?? ''; 
+      _videoUrlController.text = car['video_url'] ?? '';
 
       if (_engineTypes.contains(car['engine_type'])) {
         _engineType = car['engine_type'];
       } else if (car['engine_type'] != null) {
         final matched = _engineTypes.firstWhere(
-          (e) => e.toLowerCase().startsWith(car['engine_type'].toString().toLowerCase()),
+          (e) => e
+              .toLowerCase()
+              .startsWith(car['engine_type'].toString().toLowerCase()),
           orElse: () => 'Bensin (Gasoline)',
         );
         _engineType = matched;
@@ -99,6 +107,7 @@ class _CarAddPageState extends State<CarAddPage> {
   Future<void> _pickImage() async {
     final pickedFile = await ImagePicker().pickImage(
       source: ImageSource.gallery,
+      imageQuality: 85,
     );
     if (pickedFile != null) {
       setState(() {
@@ -147,9 +156,10 @@ class _CarAddPageState extends State<CarAddPage> {
       request.fields['seats'] = _seatsController.text.trim();
       request.fields['year'] = _yearController.text.trim();
       request.fields['price_per_day'] = _priceController.text.trim();
-      request.fields['driver_price_per_day'] = _driverPriceController.text.trim();
+      request.fields['driver_price_per_day'] =
+          _driverPriceController.text.trim();
       request.fields['description'] = _descController.text.trim();
-      request.fields['video_url'] = _videoUrlController.text.trim(); 
+      request.fields['video_url'] = _videoUrlController.text.trim();
       request.fields['status'] = _status;
 
       if (_imageFile != null) {
@@ -166,11 +176,12 @@ class _CarAddPageState extends State<CarAddPage> {
           _isEditMode
               ? 'Mobil berhasil diperbarui!'
               : 'Mobil berhasil ditambahkan!',
-          Colors.green,
+          const Color(0xFF16A34A),
         );
-        Navigator.pop(context, true); 
+        Navigator.pop(context, true);
       } else if (response.statusCode == 403) {
-        String message = 'Lengkapi Data Personal (No. HP & KTP) terlebih dahulu.';
+        String message =
+            'Lengkapi Data Personal (No. HP & KTP) terlebih dahulu.';
         try {
           final body = jsonDecode(response.body);
           if (body['message'] != null) {
@@ -178,7 +189,7 @@ class _CarAddPageState extends State<CarAddPage> {
           }
         } catch (_) {}
 
-        _showSnackBar(message, Colors.orange);
+        _showSnackBar(message, _accentColor);
 
         if (mounted) {
           Navigator.push(
@@ -200,15 +211,23 @@ class _CarAddPageState extends State<CarAddPage> {
     } catch (e) {
       _showSnackBar('Terjadi kesalahan koneksi: $e', Colors.red);
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
   void _showSnackBar(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: color),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
+      ),
     );
   }
 
@@ -223,232 +242,563 @@ class _CarAddPageState extends State<CarAddPage> {
     _driverPriceController.dispose();
     _descController.dispose();
     _fuelSpecController.dispose();
-    _videoUrlController.dispose(); 
+    _videoUrlController.dispose();
     super.dispose();
+  }
+
+  // ================= HELPER UI: SECTION CARD =================
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    required Color iconColor,
+    String? subtitle,
+    required List<Widget> children,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    if (subtitle != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          subtitle,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  // ================= HELPER UI: TEXT FIELD SERAGAM =================
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    IconData? icon,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        maxLines: maxLines,
+        style: const TextStyle(fontSize: 14),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: icon != null
+              ? Icon(icon, size: 19, color: Colors.grey.shade500)
+              : null,
+          filled: true,
+          fillColor: _bgColor,
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey.shade200),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _primaryColor, width: 1.4),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.redAccent),
+          ),
+          labelStyle: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+        ),
+        validator: validator,
+      ),
+    );
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'tersedia':
+        return const Color(0xFF16A34A);
+      case 'disewa':
+        return _accentColor;
+      case 'perbaikan':
+        return const Color(0xFFDC2626);
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'tersedia':
+        return 'Tersedia';
+      case 'disewa':
+        return 'Disewa';
+      case 'perbaikan':
+        return 'Perbaikan';
+      default:
+        return status;
+    }
+  }
+
+  IconData _statusIcon(String status) {
+    switch (status) {
+      case 'tersedia':
+        return Icons.check_circle_outline_rounded;
+      case 'disewa':
+        return Icons.directions_car_filled_outlined;
+      case 'perbaikan':
+        return Icons.build_outlined;
+      default:
+        return Icons.circle_outlined;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _bgColor,
       appBar: AppBar(
-        title: Text(_isEditMode ? 'Edit Data Mobil' : 'Tambah Mobil Baru'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        title: Text(
+          _isEditMode ? 'Edit Data Mobil' : 'Tambah Mobil Baru',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+        ),
+        centerTitle: false,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1E293B),
+        elevation: 0,
+        surfaceTintColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: Colors.grey.shade200),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: GestureDetector(
-                  onTap: _pickImage,
-                  child: Container(
-                    width: 130,
-                    height: 130,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade400),
-                      image: _imageFile != null
-                          ? DecorationImage(
-                              image: FileImage(_imageFile!),
-                              fit: BoxFit.cover,
-                            )
-                          : (_existingImageUrl != null &&
-                              _existingImageUrl!.isNotEmpty)
-                          ? DecorationImage(
-                              image: NetworkImage(
-                                  _getImageUrl(_existingImageUrl)),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                    ),
-                    child: (_imageFile == null &&
-                            (_existingImageUrl == null ||
-                                _existingImageUrl!.isEmpty))
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Icon(
-                                Icons.camera_alt,
-                                size: 40,
-                                color: Colors.grey,
-                              ),
-                              SizedBox(height: 6),
-                              Text(
-                                'Foto Mobil',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
+      body: Form(
+        key: _formKey,
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                children: [
+                  // ============ FOTO MOBIL ============
+                  Center(child: _buildPhotoPicker()),
+                  const SizedBox(height: 20),
+
+                  // ============ INFORMASI UTAMA ============
+                  _sectionCard(
+                    title: 'Informasi Utama',
+                    subtitle: 'Identitas dasar kendaraan',
+                    icon: Icons.directions_car_rounded,
+                    iconColor: _primaryColor,
+                    children: [
+                      _field(
+                        controller: _nameController,
+                        label: 'Nama Mobil',
+                        hint: 'Contoh: Avanza, Zenix Hybrid',
+                        icon: Icons.badge_outlined,
+                        validator: (v) =>
+                            v!.isEmpty ? 'Nama mobil wajib diisi' : null,
+                      ),
+                      _field(
+                        controller: _brandController,
+                        label: 'Merek / Brand',
+                        hint: 'Contoh: Toyota, Honda',
+                        icon: Icons.local_offer_outlined,
+                        validator: (v) =>
+                            v!.isEmpty ? 'Merek wajib diisi' : null,
+                      ),
+                      _field(
+                        controller: _plateController,
+                        label: 'Plat Nomor',
+                        hint: 'Contoh: BP 1234 XY',
+                        icon: Icons.confirmation_number_outlined,
+                        validator: (v) =>
+                            v!.isEmpty ? 'Plat nomor wajib diisi' : null,
+                      ),
+                    ],
+                  ),
+
+                  // ============ SPESIFIKASI TEKNIS ============
+                  _sectionCard(
+                    title: 'Spesifikasi Teknis',
+                    subtitle: 'Detail mesin dan kapasitas',
+                    icon: Icons.build_circle_outlined,
+                    iconColor: _accentColor,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        value: _engineType,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: 'Tipe Mesin Penggerak',
+                          prefixIcon: Icon(Icons.settings_outlined,
+                              size: 19, color: Colors.grey.shade500),
+                          filled: true,
+                          fillColor: _bgColor,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 14),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.grey.shade200),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                const BorderSide(color: _primaryColor, width: 1.4),
+                          ),
+                          labelStyle:
+                              TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                        ),
+                        items: _engineTypes
+                            .map((type) => DropdownMenuItem(
+                                value: type,
+                                child: Text(type,
+                                    style: const TextStyle(fontSize: 14))))
+                            .toList(),
+                        onChanged: (value) =>
+                            setState(() => _engineType = value!),
+                      ),
+                      const SizedBox(height: 14),
+                      _field(
+                        controller: _fuelSpecController,
+                        label: 'Spesifikasi BBM (Opsional)',
+                        hint: 'Contoh: Pertamax, Biosolar',
+                        icon: Icons.local_gas_station_outlined,
+                      ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _field(
+                              controller: _seatsController,
+                              label: 'Total Kursi',
+                              icon: Icons.airline_seat_recline_normal_outlined,
+                              keyboardType: TextInputType.number,
+                              validator: (v) =>
+                                  v!.isEmpty ? 'Wajib diisi' : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _field(
+                              controller: _yearController,
+                              label: 'Tahun',
+                              hint: 'Cth: 2024',
+                              icon: Icons.calendar_today_outlined,
+                              keyboardType: TextInputType.number,
+                              validator: (v) => v!.length != 4
+                                  ? 'Format tahun 4 digit'
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  // ============ HARGA & STATUS ============
+                  _sectionCard(
+                    title: 'Harga & Ketersediaan',
+                    subtitle: 'Atur tarif sewa dan status mobil',
+                    icon: Icons.payments_outlined,
+                    iconColor: const Color(0xFF16A34A),
+                    children: [
+                      _field(
+                        controller: _priceController,
+                        label: 'Harga Sewa per Hari (Rp)',
+                        icon: Icons.sell_outlined,
+                        keyboardType: TextInputType.number,
+                        validator: (v) =>
+                            v!.isEmpty ? 'Harga sewa wajib diisi' : null,
+                      ),
+                      _field(
+                        controller: _driverPriceController,
+                        label: 'Tarif Driver per Hari (Rp)',
+                        hint: 'Opsional — isi 0 jika lepas kunci',
+                        icon: Icons.person_pin_circle_outlined,
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Status Mobil',
+                        style: TextStyle(
+                            fontSize: 12.5, color: Colors.grey.shade600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _statuses.map((st) {
+                          final bool selected = st == _status;
+                          final color = _statusColor(st);
+                          return GestureDetector(
+                            onTap: () => setState(() => _status = st),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? color.withOpacity(0.1)
+                                    : _bgColor,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: selected
+                                      ? color
+                                      : Colors.grey.shade200,
+                                  width: selected ? 1.4 : 1,
                                 ),
                               ),
-                            ],
-                          )
-                        : null,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Mobil (Contoh: Avanza, Zenix Hybrid)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) =>
-                    value!.isEmpty ? 'Nama mobil wajib diisi' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _brandController,
-                decoration: const InputDecoration(
-                  labelText: 'Merek / Brand (Contoh: Toyota, Honda)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) =>
-                    value!.isEmpty ? 'Merek wajib diisi' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _plateController,
-                decoration: const InputDecoration(
-                  labelText: 'Plat Nomor (Contoh: BP 1234 XY)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) =>
-                    value!.isEmpty ? 'Plat nomor wajib diisi' : null,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _engineType,
-                decoration: const InputDecoration(
-                  labelText: 'Tipe Mesin Penggerak',
-                  border: OutlineInputBorder(),
-                ),
-                items: _engineTypes.map((type) {
-                  return DropdownMenuItem(value: type, child: Text(type));
-                }).toList(),
-                onChanged: (value) => setState(() => _engineType = value!),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _fuelSpecController,
-                decoration: const InputDecoration(
-                  labelText: 'Spesifikasi BBM (Contoh: Pertamax, Biosolar)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _seatsController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Total Kursi',
-                        border: OutlineInputBorder(),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(_statusIcon(st),
+                                      size: 16,
+                                      color: selected
+                                          ? color
+                                          : Colors.grey.shade500),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    _statusLabel(st),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: selected
+                                          ? color
+                                          : Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
                       ),
-                      validator: (value) =>
-                          value!.isEmpty ? 'Wajib diisi' : null,
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _yearController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Tahun (Cth: 2024)',
-                        border: OutlineInputBorder(),
+
+                  // ============ MEDIA & DESKRIPSI ============
+                  _sectionCard(
+                    title: 'Media & Deskripsi',
+                    subtitle: 'Lengkapi agar penyewa lebih yakin',
+                    icon: Icons.description_outlined,
+                    iconColor: _primaryColor,
+                    children: [
+                      _field(
+                        controller: _videoUrlController,
+                        label: 'Link Video Review (Opsional)',
+                        hint: 'Tempel link YouTube di sini',
+                        icon: Icons.video_library_outlined,
+                        keyboardType: TextInputType.url,
                       ),
-                      validator: (value) =>
-                          value!.length != 4 ? 'Format tahun 4 digit' : null,
-                    ),
+                      _field(
+                        controller: _descController,
+                        label: 'Deskripsi Tambahan (Opsional)',
+                        icon: Icons.notes_outlined,
+                        maxLines: 4,
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 4),
+                ],
+              ),
+            ),
+
+            // ============ TOMBOL SIMPAN (STICKY) ============
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _priceController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Harga Sewa per Hari (Rp)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) =>
-                    value!.isEmpty ? 'Harga sewa wajib diisi' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _driverPriceController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Tarif Driver per Hari (Rp) - Opsional/0 jika lepas kunci',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _videoUrlController,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'Link Video Review (Opsional: YouTube)',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.video_library),
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _status,
-                decoration: const InputDecoration(
-                  labelText: 'Status Mobil',
-                  border: OutlineInputBorder(),
-                ),
-                items: _statuses.map((st) {
-                  return DropdownMenuItem(
-                    value: st,
-                    child: Text(st.toUpperCase()),
-                  );
-                }).toList(),
-                onChanged: (value) => setState(() => _status = value!),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Deskripsi Tambahan (Opsional)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _submitCar,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: _isLoading ? null : _submitCar,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryColor,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: _primaryColor.withOpacity(0.6),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
                   ),
+                  icon: _isLoading
+                      ? const SizedBox.shrink()
+                      : Icon(
+                          _isEditMode
+                              ? Icons.save_outlined
+                              : Icons.add_circle_outline_rounded,
+                          size: 20,
+                        ),
+                  label: _isLoading
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.4,
+                          ),
+                        )
+                      : Text(
+                          _isEditMode ? 'Perbarui Mobil' : 'Simpan Mobil',
+                          style: const TextStyle(
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                 ),
-                child: _isLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : Text(
-                        _isEditMode ? 'Perbarui Mobil' : 'Simpan Mobil',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ================= WIDGET FOTO MOBIL =================
+  Widget _buildPhotoPicker() {
+    final bool hasImage = _imageFile != null ||
+        (_existingImageUrl != null && _existingImageUrl!.isNotEmpty);
+
+    return GestureDetector(
+      onTap: _pickImage,
+      child: Stack(
+        children: [
+          Container(
+            width: 140,
+            height: 140,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: hasImage ? Colors.transparent : Colors.grey.shade300,
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+              image: _imageFile != null
+                  ? DecorationImage(
+                      image: FileImage(_imageFile!), fit: BoxFit.cover)
+                  : (_existingImageUrl != null &&
+                          _existingImageUrl!.isNotEmpty)
+                      ? DecorationImage(
+                          image: NetworkImage(_getImageUrl(_existingImageUrl)),
+                          fit: BoxFit.cover)
+                      : null,
+            ),
+            child: !hasImage
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: _primaryColor.withOpacity(0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.add_a_photo_outlined,
+                            size: 24, color: _primaryColor),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tambah Foto',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade600,
                         ),
                       ),
-              ),
-            ],
+                    ],
+                  )
+                : null,
           ),
-        ),
+          if (hasImage)
+            Positioned(
+              right: 4,
+              bottom: 4,
+              child: Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: _primaryColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: const Icon(Icons.edit_rounded,
+                    size: 14, color: Colors.white),
+              ),
+            ),
+        ],
       ),
     );
   }

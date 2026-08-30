@@ -22,9 +22,21 @@ class _BookingFormPageState extends State<BookingFormPage> {
   final TextEditingController _notesController = TextEditingController();
   bool _isSubmitting = false;
 
+  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  static const Color _primaryColor = Color(0xFF2563EB);
+  static const Color _accentColor = Color(0xFFF97316);
+  static const Color _bgColor = Color(0xFFF4F6F9);
+  static const Color _successColor = Color(0xFF16A34A);
+  static const Color _dangerColor = Color(0xFFDC2626);
+  static const Color _indigoColor = Color(0xFF6366F1);
+
   // Ambil tarif driver secara dinamis dari data mobil yang dipilih
   double get _driverRatePerDay {
     return double.tryParse(widget.car['driver_price_per_day']?.toString() ?? '0') ?? 0.0;
+  }
+
+  double get _carRatePerDay {
+    return double.tryParse(widget.car['price_per_day']?.toString() ?? '0') ?? 0.0;
   }
 
   int get _totalDays {
@@ -34,9 +46,25 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   double get _totalPrice {
     if (_totalDays <= 0) return 0;
-    double carPricePerDay = double.tryParse(widget.car['price_per_day'].toString()) ?? 0;
     double driverFee = _withDriver ? _driverRatePerDay : 0;
-    return _totalDays * (carPricePerDay + driverFee);
+    return _totalDays * (_carRatePerDay + driverFee);
+  }
+
+  /// Format angka jadi "Rp 1.200.000" tanpa desimal, konsisten dgn halaman lain
+  String _formatPrice(dynamic raw) {
+    if (raw == null) return 'Rp 0';
+    final numValue = num.tryParse(raw.toString()) ?? 0;
+    final intValue = numValue.round();
+    final str = intValue.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      final posFromRight = str.length - i;
+      buffer.write(str[i]);
+      if (posFromRight > 1 && posFromRight % 3 == 1) {
+        buffer.write('.');
+      }
+    }
+    return 'Rp $buffer';
   }
 
   // Fungsi helper untuk memformat DateTime menjadi string bersih (YYYY-MM-DD)
@@ -45,12 +73,36 @@ class _BookingFormPageState extends State<BookingFormPage> {
     return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
+  /// Format tanggal untuk ditampilkan ke user, mis. "30 Agu 2026"
+  String _formatDateDisplay(DateTime? date) {
+    if (date == null) return '';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+      'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  @override
+  void dispose() {
+    _notesController.dispose();
+    super.dispose();
+  }
+
   Future<void> _selectDate(BuildContext context, bool isStart) async {
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(primary: _primaryColor),
+          ),
+          child: child!,
+        );
+      },
     );
     if (picked != null) {
       setState(() {
@@ -68,9 +120,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   Future<void> _submitBooking() async {
     if (_startDate == null || _endDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Silakan pilih tanggal mulai dan selesai sewa!')),
-      );
+      _showSnackBar('Silakan pilih tanggal mulai dan selesai sewa!', _accentColor);
       return;
     }
 
@@ -81,9 +131,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
       final token = prefs.getString('access_token');
 
       if (token == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sesi habis. Silakan login kembali.')),
-        );
+        _showSnackBar('Sesi habis. Silakan login kembali.', _dangerColor);
         setState(() => _isSubmitting = false);
         return;
       }
@@ -108,18 +156,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
       final decoded = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Booking berhasil dibuat! Silakan cek riwayat pesanan.')),
-        );
-        Navigator.pop(context, true); 
+        _showSnackBar('Booking berhasil dibuat! Silakan cek riwayat pesanan.', _successColor);
+        if (mounted) Navigator.pop(context, true);
       } else if (response.statusCode == 403) {
         String message = decoded['message'] ?? 'Akses ditolak.';
-        
+
         if (message.contains('Data Personal')) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message), backgroundColor: Colors.orange),
-          );
-          
+          _showSnackBar(message, _accentColor);
+
           if (mounted) {
             Navigator.push(
               context,
@@ -130,28 +174,45 @@ class _BookingFormPageState extends State<BookingFormPage> {
           _showPendingWarningDialog(message);
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(decoded['message'] ?? 'Gagal membuat booking')),
-        );
+        _showSnackBar(decoded['message'] ?? 'Gagal membuat booking', _dangerColor);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Terjadi kesalahan koneksi: $e')),
-      );
+      _showSnackBar('Terjadi kesalahan koneksi: $e', _dangerColor);
     } finally {
-      setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
+      ),
+    );
   }
 
   void _showPendingWarningDialog(String message) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Pesanan Pending Ditemukan'),
-        content: Text(message),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Pesanan Pending Ditemukan',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          message,
+          style: TextStyle(color: Colors.grey.shade700, fontSize: 13.5),
+        ),
         actions: [
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.pop(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: _primaryColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
             child: const Text('OK'),
           ),
         ],
@@ -162,151 +223,475 @@ class _BookingFormPageState extends State<BookingFormPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _bgColor,
       appBar: AppBar(
-        title: const Text('Form Pemesanan Mobil'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        title: const Text(
+          'Form Pemesanan Mobil',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+        ),
+        centerTitle: false,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1E293B),
+        elevation: 0,
+        surfaceTintColor: Colors.white,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: Colors.grey.shade200),
+        ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ListView(
-          children: [
-            Text(
-              widget.car['name'] ?? 'Mobil Rental',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Tarif Mobil: Rp ${widget.car['price_per_day']} / hari',
-              style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Tarif Driver: Rp $_driverRatePerDay / hari',
-              style: const TextStyle(color: Colors.indigo, fontWeight: FontWeight.w500),
-            ),
-            const Divider(height: 30),
-            
-            // Tanggal Mulai Sewa
-            ListTile(
-              shape: RoundedRectangleBorder(
-                side: const BorderSide(color: Colors.grey, width: 0.5),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              title: Text(_startDate == null
-                  ? 'Pilih Tanggal Mulai'
-                  : 'Mulai: ${_formatDate(_startDate)}'),
-              trailing: const Icon(Icons.calendar_today, color: Colors.blue),
-              onTap: () => _selectDate(context, true),
-            ),
-            const SizedBox(height: 12),
-            
-            // Tanggal Selesai Sewa
-            ListTile(
-              shape: RoundedRectangleBorder(
-                side: const BorderSide(color: Colors.grey, width: 0.5),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              title: Text(_endDate == null
-                  ? 'Pilih Tanggal Selesai'
-                  : 'Selesai: ${_formatDate(_endDate)}'),
-              trailing: const Icon(Icons.calendar_today, color: Colors.blue),
-              onTap: () => _selectDate(context, false),
-            ),
-            const SizedBox(height: 12),
-            
-            SwitchListTile(
-              title: const Text('Gunakan Jasa Sopir (Driver)', style: TextStyle(fontWeight: FontWeight.w500)),
-              subtitle: Text('Tarif tambahan: Rp $_driverRatePerDay / hari'),
-              value: _withDriver,
-              activeColor: Colors.blue,
-              onChanged: (val) {
-                setState(() {
-                  _withDriver = val;
-                });
-              },
-            ),
-            const SizedBox(height: 12),
-
-            DropdownButtonFormField<String>(
-              value: _paymentMethod,
-              decoration: const InputDecoration(
-                labelText: 'Metode Pembayaran',
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'cod',
-                  child: Text('Bayar di Tempat (COD / Tunai)'),
-                ),
-                DropdownMenuItem(
-                  value: 'qris',
-                  child: Text('QRIS (Statik / Transfer)'),
-                ),
-              ],
-              onChanged: (val) {
-                setState(() {
-                  _paymentMethod = val!;
-                });
-              },
-            ),
-
-            const SizedBox(height: 16),
-            TextField(
-              controller: _notesController,
-              decoration: const InputDecoration(
-                labelText: 'Catatan tambahan (Opsional)',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 2,
-            ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          _buildCarSummaryCard(),
+          const SizedBox(height: 16),
+          _buildSectionTitle('Jadwal Sewa'),
+          const SizedBox(height: 10),
+          _buildDateCard(),
+          const SizedBox(height: 16),
+          _buildSectionTitle('Opsi Tambahan'),
+          const SizedBox(height: 10),
+          _buildOptionsCard(),
+          const SizedBox(height: 16),
+          _buildSectionTitle('Catatan'),
+          const SizedBox(height: 10),
+          _buildNotesField(),
+          const SizedBox(height: 20),
+          if (_totalDays > 0) ...[
+            _buildSummaryCard(),
             const SizedBox(height: 20),
-            if (_totalDays > 0) ...[
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade200),
+          ],
+          _buildSubmitButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 13.5,
+        fontWeight: FontWeight.bold,
+        color: Color(0xFF1E293B),
+      ),
+    );
+  }
+
+  Widget _card({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  // ================= CARD: RINGKASAN MOBIL =================
+  Widget _buildCarSummaryCard() {
+    return _card(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _primaryColor.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.directions_car_rounded,
+                color: _primaryColor, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.car['name'] ?? 'Mobil Rental',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E293B),
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 8),
+                Row(
                   children: [
-                    Text('Durasi Sewa: $_totalDays Hari', style: const TextStyle(fontSize: 14)),
-                    const SizedBox(height: 4),
-                    Text('Opsi Driver: ${_withDriver ? "Ya (Rp $_driverRatePerDay/hari)" : "Tidak (Lepas Kunci)"}', 
-                      style: const TextStyle(fontSize: 13, color: Colors.black87)),
-                    const SizedBox(height: 4),
-                    Text('Metode Pembayaran: ${_paymentMethod == "cod" ? "Bayar di Tempat (COD)" : "QRIS"}', 
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.indigo)),
-                    const Divider(height: 16),
+                    Icon(Icons.local_offer_outlined,
+                        size: 13, color: Colors.grey.shade400),
+                    const SizedBox(width: 4),
                     Text(
-                      'Total Biaya: Rp $_totalPrice',
+                      '${_formatPrice(_carRatePerDay)} / hari',
                       style: const TextStyle(
+                        fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.blue,
+                        color: _primaryColor,
                       ),
                     ),
                   ],
                 ),
+                if (_driverRatePerDay > 0) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Icon(Icons.person_outline_rounded,
+                          size: 13, color: Colors.grey.shade400),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Tarif Sopir: ${_formatPrice(_driverRatePerDay)} / hari',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _indigoColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= CARD: TANGGAL SEWA =================
+  Widget _buildDateCard() {
+    return _card(
+      child: Column(
+        children: [
+          _buildDateTile(
+            label: 'Tanggal Mulai',
+            date: _startDate,
+            onTap: () => _selectDate(context, true),
+          ),
+          Divider(height: 20, color: Colors.grey.shade200),
+          _buildDateTile(
+            label: 'Tanggal Selesai',
+            date: _endDate,
+            onTap: () => _selectDate(context, false),
+          ),
+          if (_totalDays > 0) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: _successColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(height: 20),
-            ],
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              child: Center(
+                child: Text(
+                  'Total Durasi: $_totalDays Hari',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: _successColor,
+                  ),
+                ),
               ),
-              onPressed: _isSubmitting ? null : _submitBooking,
-              child: _isSubmitting
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text('Konfirmasi & Buat Pesanan', style: TextStyle(fontSize: 16)),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDateTile({
+    required String label,
+    required DateTime? date,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: _bgColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
         ),
+        child: Row(
+          children: [
+            Icon(Icons.calendar_today_rounded, size: 17, color: _primaryColor),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    date == null ? 'Ketuk untuk memilih' : _formatDateDisplay(date),
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: date == null ? Colors.grey.shade400 : const Color(0xFF1E293B),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ================= CARD: OPSI TAMBAHAN =================
+  Widget _buildOptionsCard() {
+    return _card(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _accentColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person_pin_circle_outlined,
+                    size: 18, color: _accentColor),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Gunakan Jasa Sopir',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Tambahan ${_formatPrice(_driverRatePerDay)} / hari',
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: _withDriver,
+                activeColor: _primaryColor,
+                onChanged: (val) {
+                  setState(() {
+                    _withDriver = val;
+                  });
+                },
+              ),
+            ],
+          ),
+          Divider(height: 24, color: Colors.grey.shade200),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _primaryColor.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.payments_outlined,
+                    size: 18, color: _primaryColor),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Metode Pembayaran',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: _paymentMethod,
+                      isExpanded: true,
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
+                      icon: Icon(Icons.keyboard_arrow_down_rounded,
+                          color: Colors.grey.shade500),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: _bgColor,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey.shade200),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: _primaryColor, width: 1.4),
+                        ),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'cod',
+                          child: Text('Bayar di Tempat (COD / Tunai)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'qris',
+                          child: Text('QRIS (Statik / Transfer)'),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        setState(() {
+                          _paymentMethod = val!;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= CATATAN =================
+  Widget _buildNotesField() {
+    return _card(
+      child: TextField(
+        controller: _notesController,
+        maxLines: 2,
+        style: const TextStyle(fontSize: 13.5),
+        decoration: InputDecoration(
+          hintText: 'Contoh: Tolong dibersihkan dulu, dijemput jam 9 pagi, dll.',
+          hintStyle: TextStyle(fontSize: 12.5, color: Colors.grey.shade400),
+          border: InputBorder.none,
+          isCollapsed: true,
+        ),
+      ),
+    );
+  }
+
+  // ================= CARD: RINGKASAN BIAYA =================
+  Widget _buildSummaryCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _primaryColor.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _primaryColor.withOpacity(0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.receipt_long_rounded, size: 16, color: _primaryColor),
+              const SizedBox(width: 6),
+              const Text(
+                'Ringkasan Biaya',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _summaryRow('Durasi Sewa', '$_totalDays Hari'),
+          const SizedBox(height: 6),
+          _summaryRow(
+            'Opsi Driver',
+            _withDriver
+                ? 'Ya (${_formatPrice(_driverRatePerDay)}/hari)'
+                : 'Tidak (Lepas Kunci)',
+          ),
+          const SizedBox(height: 6),
+          _summaryRow(
+            'Metode Pembayaran',
+            _paymentMethod == 'cod' ? 'Bayar di Tempat (COD)' : 'QRIS',
+          ),
+          Divider(height: 20, color: _primaryColor.withOpacity(0.15)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Total Biaya',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                _formatPrice(_totalPrice),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  color: _primaryColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+        Text(
+          value,
+          style: const TextStyle(
+              fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+        ),
+      ],
+    );
+  }
+
+  // ================= TOMBOL SUBMIT =================
+  Widget _buildSubmitButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: _isSubmitting ? null : _submitBooking,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _primaryColor,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          disabledBackgroundColor: _primaryColor.withOpacity(0.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        icon: _isSubmitting
+            ? const SizedBox.shrink()
+            : const Icon(Icons.check_circle_outline_rounded, size: 19),
+        label: _isSubmitting
+            ? const SizedBox(
+                height: 22,
+                width: 22,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2.4,
+                ),
+              )
+            : const Text(
+                'Konfirmasi & Buat Pesanan',
+                style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+              ),
       ),
     );
   }
