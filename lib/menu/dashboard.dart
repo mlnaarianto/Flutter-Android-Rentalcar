@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/menu/car_detail_page.dart';
-import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
+import 'package:rentalcar/enums/app_enums.dart';
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -22,8 +22,9 @@ class _DashboardState extends State<Dashboard> {
   String _userName = '';
   String _userRole = '';
   String _searchQuery = '';
+  int? _currentUserId; // 👈 Tambahkan variabel ini untuk ngecek kepemilikan mobil
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= WARNA TEMA =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
   static const Color _bgColor = Color(0xFFF4F6F9);
@@ -35,7 +36,7 @@ class _DashboardState extends State<Dashboard> {
     _fetchDashboardCars();
   }
 
-  /// Mengambil data nama & role asli dari SharedPreferences (Session login)
+  /// Mengambil data nama, role, dan user_id dari SharedPreferences
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -43,6 +44,14 @@ class _DashboardState extends State<Dashboard> {
           prefs.getString('email')?.split('@')[0] ??
           'Pengguna';
       _userRole = prefs.getString('role') ?? AppRole.penyewa.value;
+
+      // 👇 Ambil ID user yang sedang login
+      final storedId = prefs.get('user_id');
+      if (storedId is int) {
+        _currentUserId = storedId;
+      } else if (storedId is String) {
+        _currentUserId = int.tryParse(storedId);
+      }
     });
   }
 
@@ -80,7 +89,7 @@ class _DashboardState extends State<Dashboard> {
     }
   }
 
-  /// Fungsi untuk filter pencarian dari AppLayout / Navbar search
+  /// Fungsi untuk filter pencarian
   void _filterCars(String query) {
     setState(() {
       _searchQuery = query;
@@ -88,10 +97,19 @@ class _DashboardState extends State<Dashboard> {
         _filteredCars = _allCars;
       } else {
         _filteredCars = _allCars.where((car) {
-          final name = (car['name'] ?? '').toLowerCase();
-          final brand = (car['brand'] ?? '').toLowerCase();
+          final name = (car['name'] ?? '').toString().toLowerCase();
+          final brand = (car['brand'] ?? '').toString().toLowerCase();
+          
+          // 👇 Tambahkan pencarian berdasarkan nama pemilik
+          String ownerStr = '';
+          if (car['user'] != null && car['user']['name'] != null) {
+            ownerStr = car['user']['name'].toString().toLowerCase();
+          } else if (car['owner_name'] != null) {
+            ownerStr = car['owner_name'].toString().toLowerCase();
+          }
+
           final input = query.toLowerCase();
-          return name.contains(input) || brand.contains(input);
+          return name.contains(input) || brand.contains(input) || ownerStr.contains(input);
         }).toList();
       }
     });
@@ -108,7 +126,6 @@ class _DashboardState extends State<Dashboard> {
         : '$serverRoot/storage/$imagePath';
   }
 
-  /// Format angka harga jadi "Rp 1.200.000" biar konsisten dgn halaman detail
   String _formatPrice(dynamic raw) {
     if (raw == null) return 'Rp 0';
     final numValue = num.tryParse(raw.toString()) ?? 0;
@@ -127,27 +144,19 @@ class _DashboardState extends State<Dashboard> {
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'tersedia':
-        return const Color(0xFF16A34A);
-      case 'disewa':
-        return _accentColor;
-      case 'perbaikan':
-        return const Color(0xFFDC2626);
-      default:
-        return Colors.grey;
+      case 'tersedia': return const Color(0xFF16A34A);
+      case 'disewa': return _accentColor;
+      case 'perbaikan': return const Color(0xFFDC2626);
+      default: return Colors.grey;
     }
   }
 
   String _statusLabel(String status) {
     switch (status) {
-      case 'tersedia':
-        return 'Tersedia';
-      case 'disewa':
-        return 'Disewa';
-      case 'perbaikan':
-        return 'Perbaikan';
-      default:
-        return status.isEmpty ? '-' : status;
+      case 'tersedia': return 'Tersedia';
+      case 'disewa': return 'Disewa';
+      case 'perbaikan': return 'Perbaikan';
+      default: return status.isEmpty ? '-' : status;
     }
   }
 
@@ -194,11 +203,7 @@ class _DashboardState extends State<Dashboard> {
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(
-            color: _primaryColor.withOpacity(0.25),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
+          BoxShadow(color: _primaryColor.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 8)),
         ],
       ),
       child: Row(
@@ -209,22 +214,14 @@ class _DashboardState extends State<Dashboard> {
               children: [
                 Text(
                   'Halo, $_userName! 👋',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   isOwner
                       ? 'Kelola armada rental mobil Anda dengan mudah di sini.'
                       : 'Temukan mobil impian untuk perjalanan nyaman Anda hari ini.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.85),
-                    fontSize: 12.5,
-                    height: 1.4,
-                  ),
+                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12.5, height: 1.4),
                 ),
               ],
             ),
@@ -232,14 +229,9 @@ class _DashboardState extends State<Dashboard> {
           const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), shape: BoxShape.circle),
             child: Icon(
-              isOwner
-                  ? Icons.directions_car_filled_rounded
-                  : Icons.travel_explore_rounded,
+              isOwner ? Icons.directions_car_filled_rounded : Icons.travel_explore_rounded,
               color: Colors.white,
               size: 26,
             ),
@@ -256,25 +248,14 @@ class _DashboardState extends State<Dashboard> {
       children: [
         const Text(
           'Daftar Mobil Tersedia',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1E293B),
-          ),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
         ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: _primaryColor.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(20),
-          ),
+          decoration: BoxDecoration(color: _primaryColor.withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
           child: Text(
             '${_filteredCars.length} Unit',
-            style: const TextStyle(
-              fontSize: 12,
-              color: _primaryColor,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 12, color: _primaryColor, fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -291,11 +272,7 @@ class _DashboardState extends State<Dashboard> {
           Expanded(
             child: Text(
               'Hasil pencarian untuk: "$_searchQuery"',
-              style: TextStyle(
-                fontStyle: FontStyle.italic,
-                color: Colors.grey.shade600,
-                fontSize: 12.5,
-              ),
+              style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey.shade600, fontSize: 12.5),
             ),
           ),
         ],
@@ -307,10 +284,7 @@ class _DashboardState extends State<Dashboard> {
   Widget _buildCarList() {
     if (_isLoading) {
       return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(48.0),
-          child: CircularProgressIndicator(color: _primaryColor),
-        ),
+        child: Padding(padding: EdgeInsets.all(48.0), child: CircularProgressIndicator(color: _primaryColor)),
       );
     }
 
@@ -320,8 +294,7 @@ class _DashboardState extends State<Dashboard> {
           padding: const EdgeInsets.all(40.0),
           child: Column(
             children: [
-              Icon(Icons.search_off_rounded,
-                  size: 44, color: Colors.grey.shade400),
+              Icon(Icons.search_off_rounded, size: 44, color: Colors.grey.shade400),
               const SizedBox(height: 12),
               Text(
                 _searchQuery.isNotEmpty
@@ -353,17 +326,28 @@ class _DashboardState extends State<Dashboard> {
     final String status = car['status'] ?? '';
     final statusColor = _statusColor(status);
 
+    // 👇 Cek kepemilikan
+    final int carUserId = int.tryParse(car['user_id'].toString()) ?? 0;
+    final bool isOwnerCar = _currentUserId != null && carUserId == _currentUserId;
+
+    // 👇 Ambil nama pemilik
+    String ownerName = 'Pemilik Tidak Diketahui';
+    if (car['user'] != null && car['user']['name'] != null) {
+      ownerName = car['user']['name'];
+    } else if (car['owner_name'] != null) {
+      ownerName = car['owner_name'];
+    }
+
+    // 👇 Setel warna sesuai kepemilikan
+    final Color ownerColor = isOwnerCar ? _accentColor : _primaryColor;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 4)),
         ],
       ),
       child: Material(
@@ -373,9 +357,7 @@ class _DashboardState extends State<Dashboard> {
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => CarDetailPage(carId: car['id']),
-              ),
+              MaterialPageRoute(builder: (_) => CarDetailPage(carId: car['id'])),
             );
           },
           child: Padding(
@@ -391,10 +373,9 @@ class _DashboardState extends State<Dashboard> {
                           ? Image.network(
                               imageUrl,
                               width: 84,
-                              height: 84,
+                              height: 94, // 👈 Ditinggikan sedikit agar seimbang dengan tambahan teks
                               fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  _buildPlaceholder(),
+                              errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
                             )
                           : _buildPlaceholder(),
                     ),
@@ -408,8 +389,7 @@ class _DashboardState extends State<Dashboard> {
                           decoration: BoxDecoration(
                             color: statusColor,
                             shape: BoxShape.circle,
-                            border:
-                                Border.all(color: Colors.white, width: 1.6),
+                            border: Border.all(color: Colors.white, width: 1.6),
                           ),
                         ),
                       ),
@@ -425,29 +405,16 @@ class _DashboardState extends State<Dashboard> {
                           Expanded(
                             child: Text(
                               (car['brand'] ?? '').toString().toUpperCase(),
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: Colors.grey.shade500,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.4,
-                              ),
+                              style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500, fontWeight: FontWeight.bold, letterSpacing: 0.4),
                             ),
                           ),
                           if (status.isNotEmpty)
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: statusColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
                               child: Text(
                                 _statusLabel(status),
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: statusColor,
-                                ),
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
                               ),
                             ),
                         ],
@@ -457,49 +424,52 @@ class _DashboardState extends State<Dashboard> {
                         car['name'] ?? 'Mobil Rental',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E293B),
-                        ),
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Icon(Icons.event_seat_outlined,
-                              size: 13, color: Colors.grey.shade400),
+                          Icon(Icons.event_seat_outlined, size: 13, color: Colors.grey.shade400),
                           const SizedBox(width: 3),
-                          Text(
-                            '${car['seats'] ?? '-'} Kursi',
-                            style: TextStyle(
-                                fontSize: 11.5, color: Colors.grey.shade600),
-                          ),
+                          Text('${car['seats'] ?? '-'} Kursi', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
                           const SizedBox(width: 10),
-                          Icon(Icons.calendar_today_outlined,
-                              size: 12, color: Colors.grey.shade400),
+                          Icon(Icons.calendar_today_outlined, size: 12, color: Colors.grey.shade400),
                           const SizedBox(width: 3),
-                          Text(
-                            '${car['year'] ?? '-'}',
-                            style: TextStyle(
-                                fontSize: 11.5, color: Colors.grey.shade600),
+                          Text('${car['year'] ?? '-'}', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      
+                      // 👇 Tambahan Label Pemilik
+                      Row(
+                        children: [
+                          Icon(Icons.person_pin_rounded, size: 13, color: ownerColor),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              isOwnerCar ? 'Milik Anda ($ownerName)' : 'Milik $ownerName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: ownerColor,
+                              ),
+                            ),
                           ),
                         ],
                       ),
+
                       const SizedBox(height: 8),
                       Text(
                         '${_formatPrice(car['price_per_day'])} / hari',
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          color: _primaryColor,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(fontSize: 13.5, color: _primaryColor, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 4),
-                Icon(Icons.arrow_forward_ios_rounded,
-                    size: 13, color: Colors.grey.shade400),
+                Icon(Icons.arrow_forward_ios_rounded, size: 13, color: Colors.grey.shade400),
               ],
             ),
           ),
@@ -511,10 +481,9 @@ class _DashboardState extends State<Dashboard> {
   Widget _buildPlaceholder() {
     return Container(
       width: 84,
-      height: 84,
+      height: 94, // 👈 Samakan dengan tinggi network image
       color: _bgColor,
-      child: Icon(Icons.directions_car_rounded,
-          color: Colors.grey.shade400, size: 30),
+      child: Icon(Icons.directions_car_rounded, color: Colors.grey.shade400, size: 30),
     );
   }
 }

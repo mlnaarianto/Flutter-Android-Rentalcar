@@ -13,6 +13,7 @@ class AppLayout extends StatefulWidget {
   final int currentIndex;
   final Function(int) onTap;
   final ValueChanged<String>? appBarSearchCallback;
+  final Widget? floatingActionButton; // 👈 Parameter baru untuk FAB
 
   const AppLayout({
     super.key,
@@ -21,6 +22,7 @@ class AppLayout extends StatefulWidget {
     required this.currentIndex,
     required this.onTap,
     this.appBarSearchCallback,
+    this.floatingActionButton, // 👈 Daftarkan di constructor
   });
 
   @override
@@ -113,6 +115,7 @@ class _AppLayoutState extends State<AppLayout> {
         userRoles: _roles,
       ),
       body: widget.content,
+      floatingActionButton: widget.floatingActionButton, // 👈 Posisikan FAB di Scaffold ini
       bottomNavigationBar: Bottom(
         currentIndex: widget.currentIndex,
         onTap: widget.onTap,
