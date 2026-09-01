@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
+import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -129,6 +130,12 @@ class _LoginPageState extends State<LoginPage> {
         }
 
         debugPrint('✅ Login sukses! User ID: ${userData?['id']} | Email: ${userData?['email']}');
+
+        // 🟢 TAMBAHAN: mulai koneksi real-time SEKALI di sini, tepat
+        // setelah token & user_id tersimpan ke SharedPreferences.
+        // Sengaja tidak di-"await" — biar navigasi ke Dashboard tidak
+        // ikut menunggu proses koneksi WebSocket selesai dulu.
+        NotificationSocketService().connect();
 
         // Navigasi ke Dashboard
         if (mounted) {

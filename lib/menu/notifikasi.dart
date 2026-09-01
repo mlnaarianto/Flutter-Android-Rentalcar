@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
 
 class NotifikasiPage extends StatefulWidget {
   const NotifikasiPage({super.key});
@@ -16,6 +19,12 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  // 🟢 TAMBAHAN: koneksi real-time ke Reverb
+  WebSocketChannel? _wsChannel;
+  StreamSubscription? _wsSubscription;
+  String? _socketId;
+  bool _isSubscribed = false;
+
   // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
@@ -27,8 +36,26 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   @override
   void initState() {
     super.initState();
+
+    // 🟢 TAMBAHAN: begitu halaman ini dibuka, badge merah di Navbar
+    // langsung dipadamkan — sinkron dengan _markNotificationsAsRead()
+    // di bawah yang menandai read-all ke backend. Tanpa baris ini,
+    // badge cuma akan update setelah event WebSocket BARU masuk, bukan
+    // langsung padam saat user "melihat" halaman ini.
+    NotificationSocketService().markAsSeen();
+
     _fetchNotifications();
     _markNotificationsAsRead(); // 🟢 Otomatis tandai sudah dibaca saat halaman dibuka
+    _connectRealtime(); // 🟢 TAMBAHAN: mulai koneksi websocket Reverb
+  }
+
+  @override
+  void dispose() {
+    // 🟢 TAMBAHAN: tutup koneksi websocket saat halaman ditutup, supaya
+    // tidak ada listener yang numpuk / nyala di background sia-sia.
+    _wsSubscription?.cancel();
+    _wsChannel?.sink.close();
+    super.dispose();
   }
 
   /// ================= AMBIL DATA NOTIFIKASI =================
@@ -101,6 +128,190 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
       // Abaikan jika gagal agar tidak mengganggu UI
     }
   }
+
+  // ================= 🟢 TAMBAHAN: REALTIME VIA REVERB =================
+
+  Future<String?> _getCurrentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_id');
+  }
+
+  Future<void> _connectRealtime() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+      final userId = await _getCurrentUserId();
+
+      // 🟢 DEBUG: pastikan token & userId benar-benar ada sebelum lanjut
+      debugPrint(
+          'Reverb DEBUG -> token: ${token != null ? "ADA" : "NULL ❌"}, userId: ${userId ?? "NULL ❌"}');
+
+      if (token == null || userId == null) {
+        debugPrint('Reverb: token atau userId belum tersedia, skip koneksi realtime.');
+        return;
+      }
+
+      // Ambil host dari ApiConfig.baseUrl (misal http://192.168.x.x:8000/api)
+      // supaya host Reverb selalu konsisten dengan host API yang sudah
+      // terbukti bisa diakses dari device/emulator ini — tidak hardcode
+      // IP terpisah yang bisa beda-beda per environment.
+      final apiUri = Uri.parse(ApiConfig.baseUrl);
+
+      // 👉 SESUAIKAN kalau port/scheme Reverb kamu beda dari default ini.
+      const reverbPort = 9090;
+      const reverbAppKey = '27d6a6d4761caf333da8';
+      const useTLS = false; // true kalau REVERB_SCHEME=https di production
+
+      final wsUri = Uri(
+        scheme: useTLS ? 'wss' : 'ws',
+        host: apiUri.host,
+        port: reverbPort,
+        path: '/app/$reverbAppKey',
+        queryParameters: {
+          'protocol': '7',
+          'client': 'flutter',
+          'version': '1.0.0',
+          'flash': 'false',
+        },
+      );
+
+      // 🟢 DEBUG: tampilkan alamat websocket yang dituju
+      debugPrint('Reverb DEBUG -> Mencoba connect ke: $wsUri');
+
+      _wsChannel = WebSocketChannel.connect(wsUri);
+
+      _wsSubscription = _wsChannel!.stream.listen(
+        (raw) {
+          // 🟢 DEBUG: tampilkan setiap pesan mentah yang masuk dari server
+          debugPrint('Reverb DEBUG -> Pesan masuk: $raw');
+          _handleSocketMessage(raw, userId, token, apiUri);
+        },
+        onError: (e) => debugPrint('Reverb WS error: $e'),
+        onDone: () {
+          debugPrint('Reverb WS closed.');
+          _isSubscribed = false;
+        },
+      );
+    } catch (e) {
+      debugPrint('Gagal konek realtime Reverb: $e');
+    }
+  }
+
+  void _handleSocketMessage(
+    dynamic raw,
+    String userId,
+    String token,
+    Uri apiUri,
+  ) async {
+    try {
+      final msg = jsonDecode(raw as String);
+      final event = msg['event'];
+
+      if (event == 'pusher:connection_established') {
+        final connData = jsonDecode(msg['data']);
+        _socketId = connData['socket_id'];
+        debugPrint('Reverb DEBUG -> Koneksi established, socket_id: $_socketId');
+        await _subscribeToChannel(userId, token, apiUri);
+        return;
+      }
+
+      // 🟢 DEBUG: konfirmasi subscribe channel berhasil di-ack server
+      if (event == 'pusher_internal:subscription_succeeded' ||
+          event == 'pusher:subscription_succeeded') {
+        debugPrint('Reverb DEBUG -> ✅ Berhasil subscribe ke channel privat!');
+        return;
+      }
+
+      // Nama event broadcastAs() di backend adalah 'notification.created',
+      // tapi channel privat mengirimnya dengan titik di depan.
+      if (event == '.notification.created' || event == 'notification.created') {
+        final payload = jsonDecode(msg['data']);
+        final newNotif = payload['data'];
+
+        debugPrint('Reverb DEBUG -> 🔔 Notifikasi baru diterima: ${newNotif['title']}');
+
+        // 🟢 TAMBAHAN: notifikasi masuk SAAT halaman ini terbuka —
+        // pastikan badge tetap padam (bukannya nyala lagi gara-gara
+        // event baru), karena user memang sedang melihat halaman ini.
+        NotificationSocketService().markAsSeen();
+
+        if (!mounted) return;
+        setState(() {
+          // 🟢 Guard anti-duplikat, sama seperti fix di versi React.
+          final alreadyExists =
+              _notifications.any((n) => n['id'] == newNotif['id']);
+          if (!alreadyExists) {
+            _notifications.insert(0, newNotif);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Gagal parse pesan Reverb: $e');
+    }
+  }
+
+  Future<void> _subscribeToChannel(
+    String userId,
+    String token,
+    Uri apiUri,
+  ) async {
+    if (_socketId == null) return;
+
+    final channelName = 'private-notifications.$userId';
+
+    // Endpoint auth broadcasting ada di ROOT domain (bukan di bawah /api),
+    // sama persis seperti route default Laravel Broadcast::routes().
+    final authUrl = Uri(
+      scheme: apiUri.scheme,
+      host: apiUri.host,
+      port: apiUri.hasPort ? apiUri.port : null,
+      path: '/broadcasting/auth',
+    );
+
+    // 🟢 DEBUG: tampilkan channel & URL auth yang akan dipanggil
+    debugPrint('Reverb DEBUG -> Subscribe channel: $channelName');
+    debugPrint('Reverb DEBUG -> Auth URL: $authUrl');
+
+    try {
+      final authResponse = await http.post(
+        authUrl,
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: {
+          'socket_id': _socketId,
+          'channel_name': channelName,
+        },
+      );
+
+      // 🟢 DEBUG: tampilkan hasil response auth apapun hasilnya
+      debugPrint(
+          'Reverb DEBUG -> Auth response (${authResponse.statusCode}): ${authResponse.body}');
+
+      if (authResponse.statusCode != 200) {
+        debugPrint(
+            'Broadcasting auth gagal (${authResponse.statusCode}): ${authResponse.body}');
+        return;
+      }
+
+      final authData = jsonDecode(authResponse.body);
+
+      _wsChannel?.sink.add(jsonEncode({
+        'event': 'pusher:subscribe',
+        'data': {
+          'channel': channelName,
+          'auth': authData['auth'],
+        },
+      }));
+
+      _isSubscribed = true;
+    } catch (e) {
+      debugPrint('Gagal subscribe channel Reverb: $e');
+    }
+  }
+
+  // ================= END TAMBAHAN REALTIME =================
 
   IconData _getNotifIcon(String? type) {
     switch (type) {

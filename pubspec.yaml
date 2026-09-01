@@ -35,6 +35,8 @@ dependencies:
   google_sign_in: ^6.3.0
   http: ^1.2.0
   shared_preferences: ^2.3.2
+  web_socket_channel: ^2.4.0 # 🟢 TAMBAHAN: koneksi real-time ke Reverb
+
 
   # Tambahkan dua baris ini untuk Firebase & Firestore
   firebase_core: ^3.6.0

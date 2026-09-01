@@ -1,9 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/notifikasi.dart';
+import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
 
 class Navbar extends StatefulWidget implements PreferredSizeWidget {
   final String title;
@@ -26,48 +23,13 @@ class _NavbarState extends State<Navbar> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
 
-  bool _hasNewNotifications = false;
+  // 🟢 TAMBAHAN: pakai service singleton, bukan fetch/koneksi sendiri.
+  // Navbar cuma "dengarkan" status dari sini — koneksi WebSocket-nya
+  // sendiri sudah hidup sejak login, dikelola terpusat di satu tempat.
+  final NotificationSocketService _socketService = NotificationSocketService();
 
   // ================= WARNA SENADA DENGAN HALAMAN LAIN (PUTIH) =================
   static const Color _fgColor = Color(0xFF1E293B);
-
-  @override
-  void initState() {
-    super.initState();
-    _checkNotificationStatus();
-  }
-
-  /// ================= CEK STATUS NOTIFIKASI DARI BACKEND =================
-  Future<void> _checkNotificationStatus() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
-
-      if (token == null) return;
-
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/notifications'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        final List notifications = decoded['data'] ?? [];
-
-        // Cek apakah ada notifikasi yang 'is_read'-nya bernilai false
-        bool hasUnread = notifications.any((notif) => notif['is_read'] == false);
-
-        setState(() {
-          _hasNewNotifications = hasUnread;
-        });
-      }
-    } catch (_) {
-      // Abaikan jika terjadi kendala koneksi
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,9 +80,6 @@ class _NavbarState extends State<Navbar> {
             ),
       centerTitle: true,
       actions: [
-        // Ikon search cuma muncul kalau halaman ini butuh pencarian
-        // (yaitu kalau onSearchChanged di-pass). Kalau tidak, sembunyikan
-        // total — misalnya di halaman Profil yang memang tidak ada search.
         if (widget.onSearchChanged != null)
           IconButton(
             icon: Icon(_isSearching ? Icons.close : Icons.search),
@@ -141,32 +100,41 @@ class _NavbarState extends State<Navbar> {
               IconButton(
                 icon: const Icon(Icons.notifications),
                 onPressed: () async {
-                  // Buka halaman notifikasi
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => const NotifikasiPage(),
                     ),
                   );
-                  // Segarkan status titik merah setelah kembali dari halaman notifikasi
-                  _checkNotificationStatus();
+                  // Tidak perlu manual refetch lagi di sini — begitu
+                  // NotifikasiPage dibuka, dia otomatis markAsSeen()
+                  // lewat service, dan badge ikut update via listener.
                 },
               ),
-              // Titik Indikator Merah
-              if (_hasNewNotifications)
-                Positioned(
-                  right: 11,
-                  top: 11,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
+              // 🟢 TAMBAHAN: dengarkan status real-time dari service,
+              // bukan state lokal lagi. ValueListenableBuilder otomatis
+              // rebuild widget ini SETIAP KALI hasUnread berubah —
+              // termasuk saat event WebSocket masuk kapan saja, di
+              // halaman manapun user sedang berada.
+              ValueListenableBuilder<bool>(
+                valueListenable: _socketService.hasUnread,
+                builder: (context, hasUnread, _) {
+                  if (!hasUnread) return const SizedBox.shrink();
+                  return Positioned(
+                    right: 11,
+                    top: 11,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
+              ),
             ],
           ),
       ],

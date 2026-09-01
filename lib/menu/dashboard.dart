@@ -7,6 +7,7 @@ import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/menu/car_detail_page.dart';
 import 'package:rentalcar/enums/app_enums.dart';
+import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -34,6 +35,16 @@ class _DashboardState extends State<Dashboard> {
     super.initState();
     _loadUserData();
     _fetchDashboardCars();
+
+    // 🟢 TAMBAHAN: penting untuk kasus user SUDAH LOGIN SEBELUMNYA (buka
+    // app lagi dengan token yang masih tersimpan, tanpa lewat LoginPage
+    // sama sekali). Tanpa baris ini, koneksi WebSocket cuma akan hidup
+    // kalau user baru saja login lewat Google — padahal Dashboard bisa
+    // jadi halaman PERTAMA yang dibuka kalau sesi lama masih valid.
+    //
+    // Aman dipanggil di sini walau LoginPage juga memanggilnya — ada
+    // guard _isConnected di dalam service, jadi tidak akan connect dobel.
+    NotificationSocketService().connect();
   }
 
   /// Mengambil data nama, role, dan user_id dari SharedPreferences
