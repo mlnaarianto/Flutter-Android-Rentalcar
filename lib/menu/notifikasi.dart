@@ -3,9 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/services/notification_socket_service.dart';
 
 class NotifikasiPage extends StatefulWidget {
   const NotifikasiPage({super.key});
@@ -19,11 +18,10 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  // 🟢 TAMBAHAN: koneksi real-time ke Reverb
-  WebSocketChannel? _wsChannel;
-  StreamSubscription? _wsSubscription;
-  String? _socketId;
-  bool _isSubscribed = false;
+  // Tidak lagi bikin WebSocketChannel sendiri. Cukup dengarkan stream
+  // dari service singleton yang sudah hidup sejak login — jadi cuma
+  // ADA SATU koneksi WebSocket untuk seluruh app.
+  StreamSubscription<Map<String, dynamic>>? _notifSubscription;
 
   // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
   static const Color _primaryColor = Color(0xFF2563EB);
@@ -37,24 +35,46 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   void initState() {
     super.initState();
 
-    // 🟢 TAMBAHAN: begitu halaman ini dibuka, badge merah di Navbar
-    // langsung dipadamkan — sinkron dengan _markNotificationsAsRead()
-    // di bawah yang menandai read-all ke backend. Tanpa baris ini,
-    // badge cuma akan update setelah event WebSocket BARU masuk, bukan
-    // langsung padam saat user "melihat" halaman ini.
+    // Begitu halaman ini dibuka, badge merah di Navbar langsung padam
+    // secara visual. Ini terpisah dari status "is_read" di backend —
+    // yang itu ditangani & dikonfirmasi lewat _markNotificationsAsRead().
     NotificationSocketService().markAsSeen();
 
     _fetchNotifications();
-    _markNotificationsAsRead(); // 🟢 Otomatis tandai sudah dibaca saat halaman dibuka
-    _connectRealtime(); // 🟢 TAMBAHAN: mulai koneksi websocket Reverb
+    _markNotificationsAsRead(); // Tandai sudah dibaca ke backend (dengan retry)
+
+    // Dengarkan notifikasi baru dari service singleton, bukan bikin
+    // koneksi WebSocket baru.
+    _notifSubscription =
+        NotificationSocketService().onNewNotification.listen((newNotif) {
+      debugPrint('NotifikasiPage: 🔔 notifikasi baru diterima: ${newNotif['title']}');
+
+      // Notifikasi masuk SAAT halaman ini terbuka — badge tetap padam
+      // karena user memang sedang melihat halaman ini secara langsung.
+      NotificationSocketService().markAsSeen();
+
+      if (!mounted) return;
+      setState(() {
+        final alreadyExists =
+            _notifications.any((n) => n['id'] == newNotif['id']);
+        if (!alreadyExists) {
+          _notifications.insert(0, newNotif);
+        }
+      });
+
+      // 🟢 Notifikasi baru yang masuk saat halaman ini terbuka juga
+      // perlu ditandai read ke backend, supaya tidak numpuk jadi unread
+      // lagi saat halaman dibuka ulang nanti.
+      _markNotificationsAsRead();
+    });
   }
 
   @override
   void dispose() {
-    // 🟢 TAMBAHAN: tutup koneksi websocket saat halaman ditutup, supaya
-    // tidak ada listener yang numpuk / nyala di background sia-sia.
-    _wsSubscription?.cancel();
-    _wsChannel?.sink.close();
+    // Cukup batalkan LANGGANAN ke stream — tidak menutup koneksi
+    // WebSocket apapun, karena koneksinya memang bukan milik halaman
+    // ini. Koneksi service tetap hidup di background seperti biasa.
+    _notifSubscription?.cancel();
     super.dispose();
   }
 
@@ -106,15 +126,25 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   }
 
   /// ================= TANDAI SUDAH DIBACA KE BACKEND =================
-  Future<void> _markNotificationsAsRead() async {
+  ///
+  /// 🟢 PERBAIKAN: sebelumnya kalau request ini gagal, error ditelan
+  /// diam-diam dan `is_read` di backend tetap `false` selamanya —
+  /// akibatnya badge merah bisa "nyala lagi" saat service melakukan
+  /// pengecekan status unread dari backend (misal setelah reconnect).
+  ///
+  /// Sekarang:
+  /// - Kalau sukses: update `is_read` di state lokal juga, supaya titik
+  ///   oranye per-item ikut hilang tanpa perlu fetch ulang.
+  /// - Kalau gagal: retry otomatis (maks 3x, dengan jeda), supaya
+  ///   backend akhirnya tetap sinkron begitu koneksi pulih.
+  Future<void> _markNotificationsAsRead({int attempt = 0}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('access_token');
 
       if (token == null) return;
 
-      // Panggil endpoint Laravel untuk mengubah is_read menjadi true di database
-      await http.post(
+      final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/notifications/read-all'),
         headers: {
           'Accept': 'application/json',
@@ -122,196 +152,38 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         },
       );
 
-      // Simpan juga status lokal jika diperlukan
-      await prefs.setBool('has_unread_notifications', false);
-    } catch (_) {
-      // Abaikan jika gagal agar tidak mengganggu UI
-    }
-  }
+      if (response.statusCode == 200) {
+        await prefs.setBool('has_unread_notifications', false);
 
-  // ================= 🟢 TAMBAHAN: REALTIME VIA REVERB =================
-
-  Future<String?> _getCurrentUserId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('user_id');
-  }
-
-  Future<void> _connectRealtime() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-      final userId = await _getCurrentUserId();
-
-      // 🟢 DEBUG: pastikan token & userId benar-benar ada sebelum lanjut
-      debugPrint(
-          'Reverb DEBUG -> token: ${token != null ? "ADA" : "NULL ❌"}, userId: ${userId ?? "NULL ❌"}');
-
-      if (token == null || userId == null) {
-        debugPrint('Reverb: token atau userId belum tersedia, skip koneksi realtime.');
-        return;
-      }
-
-      // Ambil host dari ApiConfig.baseUrl (misal http://192.168.x.x:8000/api)
-      // supaya host Reverb selalu konsisten dengan host API yang sudah
-      // terbukti bisa diakses dari device/emulator ini — tidak hardcode
-      // IP terpisah yang bisa beda-beda per environment.
-      final apiUri = Uri.parse(ApiConfig.baseUrl);
-
-      // 👉 SESUAIKAN kalau port/scheme Reverb kamu beda dari default ini.
-      const reverbPort = 9090;
-      const reverbAppKey = '27d6a6d4761caf333da8';
-      const useTLS = false; // true kalau REVERB_SCHEME=https di production
-
-      final wsUri = Uri(
-        scheme: useTLS ? 'wss' : 'ws',
-        host: apiUri.host,
-        port: reverbPort,
-        path: '/app/$reverbAppKey',
-        queryParameters: {
-          'protocol': '7',
-          'client': 'flutter',
-          'version': '1.0.0',
-          'flash': 'false',
-        },
-      );
-
-      // 🟢 DEBUG: tampilkan alamat websocket yang dituju
-      debugPrint('Reverb DEBUG -> Mencoba connect ke: $wsUri');
-
-      _wsChannel = WebSocketChannel.connect(wsUri);
-
-      _wsSubscription = _wsChannel!.stream.listen(
-        (raw) {
-          // 🟢 DEBUG: tampilkan setiap pesan mentah yang masuk dari server
-          debugPrint('Reverb DEBUG -> Pesan masuk: $raw');
-          _handleSocketMessage(raw, userId, token, apiUri);
-        },
-        onError: (e) => debugPrint('Reverb WS error: $e'),
-        onDone: () {
-          debugPrint('Reverb WS closed.');
-          _isSubscribed = false;
-        },
-      );
-    } catch (e) {
-      debugPrint('Gagal konek realtime Reverb: $e');
-    }
-  }
-
-  void _handleSocketMessage(
-    dynamic raw,
-    String userId,
-    String token,
-    Uri apiUri,
-  ) async {
-    try {
-      final msg = jsonDecode(raw as String);
-      final event = msg['event'];
-
-      if (event == 'pusher:connection_established') {
-        final connData = jsonDecode(msg['data']);
-        _socketId = connData['socket_id'];
-        debugPrint('Reverb DEBUG -> Koneksi established, socket_id: $_socketId');
-        await _subscribeToChannel(userId, token, apiUri);
-        return;
-      }
-
-      // 🟢 DEBUG: konfirmasi subscribe channel berhasil di-ack server
-      if (event == 'pusher_internal:subscription_succeeded' ||
-          event == 'pusher:subscription_succeeded') {
-        debugPrint('Reverb DEBUG -> ✅ Berhasil subscribe ke channel privat!');
-        return;
-      }
-
-      // Nama event broadcastAs() di backend adalah 'notification.created',
-      // tapi channel privat mengirimnya dengan titik di depan.
-      if (event == '.notification.created' || event == 'notification.created') {
-        final payload = jsonDecode(msg['data']);
-        final newNotif = payload['data'];
-
-        debugPrint('Reverb DEBUG -> 🔔 Notifikasi baru diterima: ${newNotif['title']}');
-
-        // 🟢 TAMBAHAN: notifikasi masuk SAAT halaman ini terbuka —
-        // pastikan badge tetap padam (bukannya nyala lagi gara-gara
-        // event baru), karena user memang sedang melihat halaman ini.
-        NotificationSocketService().markAsSeen();
-
-        if (!mounted) return;
-        setState(() {
-          // 🟢 Guard anti-duplikat, sama seperti fix di versi React.
-          final alreadyExists =
-              _notifications.any((n) => n['id'] == newNotif['id']);
-          if (!alreadyExists) {
-            _notifications.insert(0, newNotif);
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('Gagal parse pesan Reverb: $e');
-    }
-  }
-
-  Future<void> _subscribeToChannel(
-    String userId,
-    String token,
-    Uri apiUri,
-  ) async {
-    if (_socketId == null) return;
-
-    final channelName = 'private-notifications.$userId';
-
-    // Endpoint auth broadcasting ada di ROOT domain (bukan di bawah /api),
-    // sama persis seperti route default Laravel Broadcast::routes().
-    final authUrl = Uri(
-      scheme: apiUri.scheme,
-      host: apiUri.host,
-      port: apiUri.hasPort ? apiUri.port : null,
-      path: '/broadcasting/auth',
-    );
-
-    // 🟢 DEBUG: tampilkan channel & URL auth yang akan dipanggil
-    debugPrint('Reverb DEBUG -> Subscribe channel: $channelName');
-    debugPrint('Reverb DEBUG -> Auth URL: $authUrl');
-
-    try {
-      final authResponse = await http.post(
-        authUrl,
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: {
-          'socket_id': _socketId,
-          'channel_name': channelName,
-        },
-      );
-
-      // 🟢 DEBUG: tampilkan hasil response auth apapun hasilnya
-      debugPrint(
-          'Reverb DEBUG -> Auth response (${authResponse.statusCode}): ${authResponse.body}');
-
-      if (authResponse.statusCode != 200) {
+        if (mounted) {
+          setState(() {
+            for (final n in _notifications) {
+              if (n is Map) n['is_read'] = true;
+            }
+          });
+        }
+      } else {
         debugPrint(
-            'Broadcasting auth gagal (${authResponse.statusCode}): ${authResponse.body}');
-        return;
+            'NotifikasiPage: read-all gagal (${response.statusCode}), attempt=$attempt');
+        _retryMarkAsRead(attempt);
       }
-
-      final authData = jsonDecode(authResponse.body);
-
-      _wsChannel?.sink.add(jsonEncode({
-        'event': 'pusher:subscribe',
-        'data': {
-          'channel': channelName,
-          'auth': authData['auth'],
-        },
-      }));
-
-      _isSubscribed = true;
     } catch (e) {
-      debugPrint('Gagal subscribe channel Reverb: $e');
+      debugPrint('NotifikasiPage: read-all error: $e, attempt=$attempt');
+      _retryMarkAsRead(attempt);
     }
   }
 
-  // ================= END TAMBAHAN REALTIME =================
+  void _retryMarkAsRead(int attempt) {
+    const maxAttempts = 3;
+    if (attempt >= maxAttempts) {
+      debugPrint('NotifikasiPage: read-all menyerah setelah $maxAttempts percobaan.');
+      return;
+    }
+    final delay = Duration(seconds: 2 * (attempt + 1)); // 2s, 4s, 6s
+    Timer(delay, () {
+      if (mounted) _markNotificationsAsRead(attempt: attempt + 1);
+    });
+  }
 
   IconData _getNotifIcon(String? type) {
     switch (type) {

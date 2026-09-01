@@ -13,7 +13,8 @@ class AppLayout extends StatefulWidget {
   final int currentIndex;
   final Function(int) onTap;
   final ValueChanged<String>? appBarSearchCallback;
-  final Widget? floatingActionButton; // 👈 Parameter baru untuk FAB
+  final Widget? floatingActionButton; // 👈 Parameter FAB
+  final bool showNotification; // 🟢 TAMBAHAN: teruskan ke Navbar
 
   const AppLayout({
     super.key,
@@ -23,6 +24,7 @@ class AppLayout extends StatefulWidget {
     required this.onTap,
     this.appBarSearchCallback,
     this.floatingActionButton, // 👈 Daftarkan di constructor
+    this.showNotification = false, // 🟢 default: tidak tampil (selain Dashboard)
   });
 
   @override
@@ -42,7 +44,7 @@ class _AppLayoutState extends State<AppLayout> {
 
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     // 1. Ambil cache lokal terlebih dahulu agar UI cepat tampil
     setState(() {
       _name = prefs.getString('user_name') ?? 'Pengguna';
@@ -74,11 +76,11 @@ class _AppLayoutState extends State<AppLayout> {
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
-        final userData = responseData['data']; 
+        final userData = responseData['data'];
 
         final fetchedName = userData['name'] ?? '';
         final fetchedEmail = userData['email'] ?? '';
-        
+
         List<dynamic> rawRoles = userData['roles'] ?? [];
         debugPrint('Roles dari API: $rawRoles');
 
@@ -108,6 +110,7 @@ class _AppLayoutState extends State<AppLayout> {
       appBar: Navbar(
         title: widget.title,
         onSearchChanged: widget.appBarSearchCallback,
+        showNotification: widget.showNotification, // 🟢 TAMBAHAN
       ),
       drawer: Sidebar(
         userName: _name,

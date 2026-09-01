@@ -5,11 +5,13 @@ import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TA
 class Navbar extends StatefulWidget implements PreferredSizeWidget {
   final String title;
   final ValueChanged<String>? onSearchChanged;
+  final bool showNotification; // 🟢 TAMBAHAN: kontrol tampil/tidaknya icon notif
 
   const Navbar({
     super.key,
     required this.title,
     this.onSearchChanged,
+    this.showNotification = false, // 🟢 default: tidak tampil
   });
 
   @override
@@ -23,7 +25,7 @@ class _NavbarState extends State<Navbar> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
 
-  // 🟢 TAMBAHAN: pakai service singleton, bukan fetch/koneksi sendiri.
+  // 🟢 pakai service singleton, bukan fetch/koneksi sendiri.
   // Navbar cuma "dengarkan" status dari sini — koneksi WebSocket-nya
   // sendiri sudah hidup sejak login, dikelola terpusat di satu tempat.
   final NotificationSocketService _socketService = NotificationSocketService();
@@ -93,7 +95,9 @@ class _NavbarState extends State<Navbar> {
               });
             },
           ),
-        if (!_isSearching)
+        // 🟢 TAMBAHAN: hanya tampil kalau tidak sedang searching
+        // DAN showNotification bernilai true (misalnya hanya di Dashboard)
+        if (!_isSearching && widget.showNotification)
           Stack(
             alignment: Alignment.center,
             children: [
@@ -111,7 +115,7 @@ class _NavbarState extends State<Navbar> {
                   // lewat service, dan badge ikut update via listener.
                 },
               ),
-              // 🟢 TAMBAHAN: dengarkan status real-time dari service,
+              // 🟢 dengarkan status real-time dari service,
               // bukan state lokal lagi. ValueListenableBuilder otomatis
               // rebuild widget ini SETIAP KALI hasUnread berubah —
               // termasuk saat event WebSocket masuk kapan saja, di
