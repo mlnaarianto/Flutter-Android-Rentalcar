@@ -27,21 +27,15 @@ class _CarDetailPageState extends State<CarDetailPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  // Controller video generik (untuk file mp4 / link langsung)
   VideoPlayerController? _videoController;
   ChewieController? _chewieController;
   bool _isVideoLoading = false;
   String? _videoError;
 
-  // Controller khusus kalau video_url ternyata link YouTube
-  YoutubePlayerController? _youtubeController;
+  String? _youtubeId;
   bool _isYoutubeVideo = false;
 
-  // Widget player yang dihasilkan oleh YoutubePlayerScaffold.builder.
-  // Ini yang dipakai di dalam card video (bukan YoutubePlayer langsung),
-  // supaya tombol fullscreen bisa benar-benar rotate & menutupi layar penuh
-  // sama seperti Chewie.
-  Widget? _youtubePlayerWidget;
+  final MapController _businessMapController = MapController();
 
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
@@ -50,15 +44,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
   @override
   void initState() {
     super.initState();
-    // Izinkan rotasi ke landscape khusus di halaman ini, supaya tombol
-    // fullscreen pada video (Chewie maupun YouTube) bisa benar-benar
-    // memutar device. Halaman lain di app tetap portrait-only karena
-    // ini di-reset lagi di dispose().
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
     ]);
     _fetchCarDetail();
   }
@@ -93,37 +81,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
         final data = jsonDecode(response.body);
         final carData = data['data'];
 
-        // Ambil video_url dan tentukan jenis player yang dipakai
         final String? videoUrl = carData['video_url'];
         if (videoUrl != null && videoUrl.isNotEmpty) {
           final youtubeId = _extractYoutubeId(videoUrl);
           if (youtubeId != null) {
             _isYoutubeVideo = true;
-            _youtubeController = YoutubePlayerController.fromVideoId(
-              videoId: youtubeId,
-              autoPlay: false,
-              params: const YoutubePlayerParams(showFullscreenButton: true),
-            );
-
-            // FIX ROTASI: paksa secara eksplisit ke landscape saat masuk
-            // fullscreen, dan balik ke portrait saat keluar. Ini perlu
-            // dipasang manual karena berbeda dari Chewie, YoutubePlayerScaffold
-            // di beberapa kondisi tidak otomatis memaksa rotasi device.
-            _youtubeController!.setFullScreenListener((isFullScreen) {
-              if (isFullScreen) {
-                SystemChrome.setPreferredOrientations([
-                  DeviceOrientation.landscapeLeft,
-                  DeviceOrientation.landscapeRight,
-                ]);
-                SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-              } else {
-                SystemChrome.setPreferredOrientations([
-                  DeviceOrientation.portraitUp,
-                  DeviceOrientation.portraitDown,
-                ]);
-                SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-              }
-            });
+            _youtubeId = youtubeId;
           } else {
             _isYoutubeVideo = false;
             _initVideoPlayer(videoUrl);
@@ -189,9 +152,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     }
   }
 
-  /// Mendeteksi apakah url adalah link YouTube dan mengambil video ID-nya.
-  /// Mendukung format: youtube.com/watch?v=ID, youtu.be/ID, youtube.com/shorts/ID
-  /// Return null kalau bukan link YouTube (berarti diperlakukan sebagai file video biasa).
   String? _extractYoutubeId(String url) {
     final patterns = [
       RegExp(r'youtu\.be/([a-zA-Z0-9_-]{11})'),
@@ -206,9 +166,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     return null;
   }
 
-  /// Mengubah beberapa format link umum (mis. Google Drive share link)
-  /// menjadi direct-link yang bisa di-stream video_player.
-  /// Kalau link sudah berupa direct video URL (.mp4, dll), dikembalikan apa adanya.
   String _resolveVideoUrl(String url) {
     final driveMatch =
         RegExp(r'drive\.google\.com/file/d/([^/]+)').firstMatch(url);
@@ -221,15 +178,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   @override
   void dispose() {
-    // Kunci lagi ke portrait-only saat meninggalkan halaman ini,
-    // supaya halaman lain di app tidak ikut bisa landscape.
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
     _chewieController?.dispose();
     _videoController?.dispose();
-    _youtubeController?.close();
     super.dispose();
   }
 
@@ -259,8 +213,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     }
   }
 
-  /// Format angka harga jadi "Rp 1.200.000" (buang desimal ".00", kasih titik ribuan)
-  /// supaya nggak wrap/kepotong di kartu harga yang sempit.
   String _formatPrice(dynamic raw) {
     if (raw == null) return 'Rp 0';
     final numValue = num.tryParse(raw.toString()) ?? 0;
@@ -290,7 +242,31 @@ class _CarDetailPageState extends State<CarDetailPage> {
     }
   }
 
-  /// ================= HELPER UI: SECTION CARD (selaras dgn ProfilPage) =================
+  void _openImageViewer({
+    required String networkUrl,
+    required String heroTag,
+    required String title,
+  }) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return FadeTransition(
+            opacity: animation,
+            child: _ZoomableImageViewer(
+              networkUrl: networkUrl,
+              heroTag: heroTag,
+              title: title,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _sectionCard({
     required String title,
     required IconData icon,
@@ -458,7 +434,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     final ownerAddress =
         personalData != null ? (personalData['address'] ?? '-') : '-';
 
-    // ============ DATA LOKASI USAHA (dari relasi user.rental_application) ============
     final rentalApplication =
         ownerData != null ? ownerData['rental_application'] : null;
     final businessName = rentalApplication != null
@@ -482,8 +457,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
     final status = _car?['status'] ?? '';
     final driverPrice = _car?['driver_price_per_day'] ?? 0;
 
-    // Body utama halaman (Scaffold biasa, isinya sama seperti sebelumnya).
-    final scaffoldBody = Scaffold(
+    return Scaffold(
       backgroundColor: _bgColor,
       extendBodyBehindAppBar: true,
       body: _isLoading
@@ -509,26 +483,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
           ? null
           : _buildBottomBar(status),
     );
-
-    // Kalau video-nya YouTube, bungkus dengan YoutubePlayerScaffold.
-    // Widget ini WAJIB jadi root/widget paling atas supaya tombol fullscreen
-    // bisa rotate ke landscape & menutupi seluruh layar (persis seperti Chewie).
-    if (_isYoutubeVideo && _youtubeController != null) {
-      return YoutubePlayerScaffold(
-        controller: _youtubeController!,
-        aspectRatio: 16 / 9,
-        builder: (context, player) {
-          // Simpan player yang "sadar fullscreen" ini, dipakai di _buildVideoSection().
-          _youtubePlayerWidget = player;
-          return scaffoldBody;
-        },
-      );
-    }
-
-    return scaffoldBody;
   }
 
-  /// ================= STATE: ERROR =================
   Widget _buildErrorState() {
     return Center(
       child: Padding(
@@ -568,7 +524,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     );
   }
 
-  /// ================= STATE: EMPTY =================
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -582,38 +537,52 @@ class _CarDetailPageState extends State<CarDetailPage> {
     );
   }
 
-  /// ================= HEADER (GAMBAR + APPBAR MELAYANG) =================
   Widget _buildHeaderImage() {
     final hasImage = _car!['image'] != null && _car!['image'].toString().isNotEmpty;
+    final String imageUrl = hasImage ? _getImageUrl(_car!['image']) : '';
+    const String heroTag = 'car-detail-photo';
+
     return SizedBox(
       height: 300,
       width: double.infinity,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          hasImage
-              ? Image.network(
-                  _getImageUrl(_car!['image']),
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
-                )
-              : _buildPlaceholderImage(),
-          // Gradient supaya tombol back & chip status tetap terbaca
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withOpacity(0.45),
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.55),
-                ],
-                stops: const [0.0, 0.45, 1.0],
+          GestureDetector(
+            onTap: hasImage
+                ? () => _openImageViewer(
+                      networkUrl: imageUrl,
+                      heroTag: heroTag,
+                      title: _car!['name'] ?? 'Foto Mobil',
+                    )
+                : null,
+            child: Hero(
+              tag: heroTag,
+              child: hasImage
+                  ? Image.network(
+                      imageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
+                    )
+                  : _buildPlaceholderImage(),
+            ),
+          ),
+          IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.45),
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.55),
+                  ],
+                  stops: const [0.0, 0.45, 1.0],
+                ),
               ),
             ),
           ),
-          // Tombol back melayang
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             left: 16,
@@ -630,33 +599,55 @@ class _CarDetailPageState extends State<CarDetailPage> {
               ),
             ),
           ),
-          // Nama & brand mobil di atas gambar
+          if (hasImage)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              right: 16,
+              child: Material(
+                color: Colors.black.withOpacity(0.35),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => _openImageViewer(
+                    networkUrl: imageUrl,
+                    heroTag: heroTag,
+                    title: _car!['name'] ?? 'Foto Mobil',
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(9),
+                    child: Icon(Icons.zoom_in_rounded, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             left: 20,
             right: 20,
             bottom: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  (_car!['brand'] ?? '').toString().toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.1,
-                    color: Colors.white.withOpacity(0.85),
+            child: IgnorePointer(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    (_car!['brand'] ?? '').toString().toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.1,
+                      color: Colors.white.withOpacity(0.85),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _car!['name'] ?? 'Tanpa Nama',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                  const SizedBox(height: 4),
+                  Text(
+                    _car!['name'] ?? 'Tanpa Nama',
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -664,7 +655,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     );
   }
 
-  /// ================= KARTU HARGA (MENGAMBANG DI BAWAH HEADER) =================
   Widget _buildPriceCard(String status, dynamic driverPrice) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -779,7 +769,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     );
   }
 
-  /// ================= KONTEN UTAMA =================
   Widget _buildContent(
       String status,
       dynamic driverPrice,
@@ -802,12 +791,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 40), 
           sliver: SliverToBoxAdapter(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ============ PEMILIK / PERENTAL ============
                 _sectionCard(
                   title: 'Pemilik / Perental',
                   subtitle: 'Kontak yang bertanggung jawab atas kendaraan ini',
@@ -825,7 +813,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   ],
                 ),
 
-                // ============ LOKASI USAHA (MAP) ============
                 if (hasLocation || businessName.isNotEmpty)
                   _sectionCard(
                     title: 'Lokasi Usaha',
@@ -844,7 +831,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                     ],
                   ),
 
-                // ============ SPESIFIKASI ============
                 _sectionCard(
                   title: 'Spesifikasi Kendaraan',
                   subtitle: 'Detail teknis kendaraan yang akan disewa',
@@ -872,7 +858,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   ],
                 ),
 
-                // ============ VIDEO ============
                 if (_isYoutubeVideo || _isVideoLoading || _videoError != null || _chewieController != null)
                   _sectionCard(
                     title: 'Video Review Kendaraan',
@@ -882,7 +867,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
                     children: [_buildVideoSection()],
                   ),
 
-                // ============ DESKRIPSI ============
                 _sectionCard(
                   title: 'Deskripsi',
                   icon: Icons.description_outlined,
@@ -906,10 +890,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     );
   }
 
-  /// ================= LOKASI USAHA (MAP PREVIEW + TOMBOL) =================
-  /// Map ditampilkan non-interaktif (IgnorePointer + InteractiveFlag.none)
-  /// supaya tidak konflik gesture scroll dengan CustomScrollView halaman ini.
-  /// Untuk navigasi/detail, user diarahkan ke Google Maps lewat tombol.
   Widget _buildBusinessLocationSection(
       String businessAddress, double? lat, double? lng, bool hasLocation) {
     return Column(
@@ -919,38 +899,99 @@ class _CarDetailPageState extends State<CarDetailPage> {
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: SizedBox(
-              height: 180,
+              height: 200,
               width: double.infinity,
-              child: IgnorePointer(
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: LatLng(lat!, lng!),
-                    initialZoom: 15.0,
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.none,
+              child: Stack(
+                children: [
+                  FlutterMap(
+                    mapController: _businessMapController,
+                    options: MapOptions(
+                      initialCenter: LatLng(lat!, lng!),
+                      initialZoom: 15.0,
+                      minZoom: 4.0,
+                      maxZoom: 18.0,
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.pinchZoom |
+                            InteractiveFlag.drag |
+                            InteractiveFlag.doubleTapZoom,
+                      ),
                     ),
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.example.rentalcar',
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: LatLng(lat, lng),
-                          width: 40,
-                          height: 40,
-                          child: const Icon(
-                            Icons.location_pin,
-                            color: Colors.red,
-                            size: 40,
+                    children: [
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.example.rentalcar',
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(lat, lng),
+                            width: 40,
+                            height: 40,
+                            child: const Icon(
+                              Icons.location_pin,
+                              color: Colors.red,
+                              size: 40,
+                            ),
                           ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Row(
+                      children: [
+                        _mapActionButton(
+                          icon: Icons.open_in_new_rounded,
+                          label: 'Google Maps',
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black87,
+                          onPressed: () => _openInGoogleMaps(lat, lng),
+                        ),
+                        const SizedBox(width: 8),
+                        _mapActionButton(
+                          icon: Icons.alt_route_rounded,
+                          label: 'Rute',
+                          backgroundColor: _primaryColor,
+                          foregroundColor: Colors.white,
+                          onPressed: () => _openDirections(lat, lng),
                         ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: Column(
+                      children: [
+                        _mapZoomButton(
+                          icon: Icons.add,
+                          heroTag: 'business_zoom_in',
+                          onPressed: () {
+                            final z = _businessMapController.camera.zoom;
+                            _businessMapController.move(
+                              _businessMapController.camera.center,
+                              z + 1,
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        _mapZoomButton(
+                          icon: Icons.remove,
+                          heroTag: 'business_zoom_out',
+                          onPressed: () {
+                            final z = _businessMapController.camera.zoom;
+                            _businessMapController.move(
+                              _businessMapController.camera.center,
+                              z - 1,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -958,43 +999,73 @@ class _CarDetailPageState extends State<CarDetailPage> {
           const SizedBox(height: 12),
           _infoTile(Icons.location_on_outlined, 'Alamat Usaha', businessAddress),
         ],
-        if (hasLocation) ...[
-          const SizedBox(height: 4),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _openInGoogleMaps(lat!, lng!),
-              icon: const Icon(Icons.map_outlined, size: 18),
-              label: const Text('Buka di Google Maps'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _primaryColor,
-                side: BorderSide(color: _primaryColor.withOpacity(0.4)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }
 
-  /// Buka lokasi di aplikasi Google Maps (kalau ada) dengan pin tepat di
-  /// titik lokasi usaha, mirip perilaku app driver/ojek online.
-  /// Pakai skema geo: dulu (native Android, langsung buka app Maps),
-  /// fallback ke URL web Google Maps kalau geo: gagal/tidak didukung.
+  Widget _mapActionButton({
+    required IconData icon,
+    required String label,
+    required Color backgroundColor,
+    required Color foregroundColor,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(10),
+      elevation: 2,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: foregroundColor),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: foregroundColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mapZoomButton({
+    required IconData icon,
+    required String heroTag,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 18, color: Colors.black87),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openInGoogleMaps(double lat, double lng) async {
     final label = Uri.encodeComponent(_car?['name'] ?? 'Lokasi Usaha');
-
     final geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng($label)');
-    final webUri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
 
     try {
-      final launched = await launchUrl(
-        geoUri,
-        mode: LaunchMode.externalApplication,
-      );
+      final launched = await launchUrl(geoUri, mode: LaunchMode.externalApplication);
       if (!launched) {
         await launchUrl(webUri, mode: LaunchMode.externalApplication);
       }
@@ -1011,17 +1082,170 @@ class _CarDetailPageState extends State<CarDetailPage> {
     }
   }
 
-  /// ================= VIDEO SECTION (isi dari card, sudah dibungkus rounded) =================
+  Future<void> _openDirections(double lat, double lng) async {
+    final navUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+
+    try {
+      final launched = await launchUrl(navUri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tidak dapat membuka aplikasi Maps.')),
+          );
+        }
+      }
+    }
+  }
+
+  /// ================= VIDEO SECTION =================
   Widget _buildVideoSection() {
-    if (_isYoutubeVideo && _youtubeController != null) {
+    if (_isYoutubeVideo && _youtubeId != null) {
+      final thumbnailUrl = 'https://img.youtube.com/vi/$_youtubeId/hqdefault.jpg';
+      
       return ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: AspectRatio(
           aspectRatio: 16 / 9,
-          // Pakai player dari YoutubePlayerScaffold.builder (sudah "sadar" fullscreen).
-          // Fallback ke YoutubePlayer biasa kalau widget-nya belum sempat ke-build.
-          child: _youtubePlayerWidget ??
-              YoutubePlayer(controller: _youtubeController!),
+          child: Material(
+            color: Colors.black,
+            child: InkWell(
+              onTap: () {
+                // MODAL BOTTOM SHEET DENGAN DESAIN MODERN & ANIMASI HALUS
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  barrierColor: Colors.black87,
+                  builder: (context) => Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(24),
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(height: 12),
+                          Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Review Kendaraan',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                IconButton(
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: Colors.white.withOpacity(0.1),
+                                    padding: const EdgeInsets.all(8),
+                                  ),
+                                  icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                                  onPressed: () => Navigator.pop(context),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Divider(color: Colors.white12, height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: YoutubePopupPlayer(youtubeId: _youtubeId!),
+                          ),
+                          SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.network(
+                    thumbnailUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (ctx, err, trace) => Container(color: Colors.black),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Colors.black.withOpacity(0.6)],
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _primaryColor.withOpacity(0.9),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded, size: 36, color: Colors.white),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 12,
+                    left: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.6),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.play_circle_fill, size: 14, color: Colors.red),
+                          SizedBox(width: 4),
+                          Text(
+                            'Tonton Video',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       );
     }
@@ -1095,45 +1319,40 @@ class _CarDetailPageState extends State<CarDetailPage> {
     return const SizedBox.shrink();
   }
 
-  /// ================= BOTTOM BAR (STICKY) =================
+  /// ================= BOTTOM BAR =================
   Widget _buildBottomBar(String status) {
     final bool available = status == 'tersedia';
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: available ? _primaryColor : Colors.grey.shade400,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          onPressed: available
-              ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => BookingFormPage(car: _car!),
-                    ),
-                  );
-                }
-              : null,
-          icon: Icon(available ? Icons.directions_car_filled_rounded : Icons.block_rounded, size: 20),
-          label: Text(
-            available ? 'Sewa Mobil Ini' : 'Mobil Sedang Tidak Tersedia',
-            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+    return Material(
+      elevation: 24,
+      color: Colors.white,
+      shadowColor: Colors.black.withOpacity(0.5),
+      child: Container(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+        child: SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: available ? _primaryColor : Colors.grey.shade400,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: available
+                ? () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => BookingFormPage(car: _car!),
+                      ),
+                    );
+                  }
+                : null,
+            icon: Icon(available ? Icons.directions_car_filled_rounded : Icons.block_rounded, size: 20),
+            label: Text(
+              available ? 'Sewa Mobil Ini' : 'Mobil Sedang Tidak Tersedia',
+              style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+            ),
           ),
         ),
       ),
@@ -1146,6 +1365,209 @@ class _CarDetailPageState extends State<CarDetailPage> {
       height: 300,
       color: Colors.grey.shade300,
       child: const Icon(Icons.directions_car_rounded, size: 64, color: Colors.white),
+    );
+  }
+}
+
+/// ================= FULLSCREEN ZOOMABLE IMAGE VIEWER =================
+class _ZoomableImageViewer extends StatefulWidget {
+  final String networkUrl;
+  final String heroTag;
+  final String title;
+
+  const _ZoomableImageViewer({
+    required this.networkUrl,
+    required this.heroTag,
+    required this.title,
+  });
+
+  @override
+  State<_ZoomableImageViewer> createState() => _ZoomableImageViewerState();
+}
+
+class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
+    with SingleTickerProviderStateMixin {
+  final TransformationController _controller = TransformationController();
+  TapDownDetails? _doubleTapDetails;
+  late final AnimationController _animController;
+  Animation<Matrix4>? _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    )..addListener(() {
+        if (_animation != null) {
+          _controller.value = _animation!.value;
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleDoubleTap() {
+    Matrix4 endMatrix;
+    final position = _doubleTapDetails?.localPosition ?? Offset.zero;
+
+    if (_controller.value != Matrix4.identity()) {
+      endMatrix = Matrix4.identity();
+    } else {
+      endMatrix = Matrix4.identity()
+        ..translate(-position.dx * 1.8, -position.dy * 1.8)
+        ..scale(2.8);
+    }
+
+    _animation = Matrix4Tween(begin: _controller.value, end: endMatrix)
+        .animate(CurveTween(curve: Curves.easeOut).animate(_animController));
+    _animController.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+      ),
+      body: GestureDetector(
+        onDoubleTapDown: (details) => _doubleTapDetails = details,
+        onDoubleTap: _handleDoubleTap,
+        child: Center(
+          child: Hero(
+            tag: widget.heroTag,
+            child: InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 5,
+              child: Image.network(
+                widget.networkUrl,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                errorBuilder: (context, error, stackTrace) => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    "Gagal memuat gambar",
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ================= YOUTUBE POPUP BOTTOM SHEET PLAYER =================
+class YoutubePopupPlayer extends StatefulWidget {
+  final String youtubeId;
+
+  const YoutubePopupPlayer({super.key, required this.youtubeId});
+
+  @override
+  State<YoutubePopupPlayer> createState() => _YoutubePopupPlayerState();
+}
+
+class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
+  late YoutubePlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = YoutubePlayerController.fromVideoId(
+      videoId: widget.youtubeId,
+      autoPlay: true,
+      params: const YoutubePlayerParams(
+        showFullscreenButton: true,
+        showControls: true,
+        strictRelatedVideos: true,
+      ),
+    );
+
+    _controller.setFullScreenListener((isFullScreen) {
+      if (isFullScreen) {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ]);
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      }
+    });
+  }
+
+  Future<void> _openInYouTubeApp() async {
+    // Mengambil waktu pemutaran via Future getter .currentTime di versi 6.0.2
+    final double currentSeconds = await _controller.currentTime;
+    final int secondsInt = currentSeconds.floor();
+
+    final String urlString = secondsInt > 1
+        ? 'https://www.youtube.com/watch?v=${widget.youtubeId}&t=${secondsInt}s'
+        : 'https://www.youtube.com/watch?v=${widget.youtubeId}';
+
+    final youtubeUrl = Uri.parse(urlString);
+    
+    try {
+      await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak dapat membuka YouTube.')),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.close();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        YoutubePlayerScaffold(
+          controller: _controller,
+          aspectRatio: 16 / 9,
+          builder: (context, player) {
+            return Center(
+              child: player,
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        TextButton.icon(
+          onPressed: _openInYouTubeApp,
+          icon: const Icon(Icons.open_in_new_rounded, size: 16, color: Colors.redAccent),
+          label: const Text(
+            'Tonton langsung di Aplikasi YouTube (Lanjutkan Menit Ini)',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ),
+      ],
     );
   }
 }

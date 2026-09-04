@@ -25,6 +25,9 @@ class _SidebarState extends State<Sidebar> {
   String? _avatarUrl;
   String? _userId;
 
+  // Tag unik untuk animasi Hero avatar sidebar -> fullscreen viewer
+  static const String _avatarHeroTag = 'sidebar-user-avatar';
+
   // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
@@ -42,6 +45,55 @@ class _SidebarState extends State<Sidebar> {
       _avatarUrl = prefs.getString('avatar_url');
       _userId = prefs.getString('user_id') ?? '3';
     });
+  }
+
+  /// ================= FIX FOTO GOOGLE BURAM/PIXELATED =================
+  /// Kalau foto profil berasal dari Google Sign-In, URL-nya biasanya sudah
+  /// dibatasi ukurannya kecil (mis. diakhiri "=s96-c" -> cuma 96x96px).
+  /// Di avatar kecil di header sidebar ini tidak kelihatan, tapi begitu
+  /// di-stretch ke viewer fullscreen jadi buram/pecah. Solusinya: ganti
+  /// angka ukuran di URL-nya jadi lebih besar sebelum dipakai untuk viewer
+  /// full-screen. Sama persis dengan yang dipakai di ProfilPage & ChatPage.
+  String? _hiResAvatarUrl(String? url, {int size = 720}) {
+    if (url == null || url.isEmpty) return url;
+    final sizePattern = RegExp(r'=s\d+-c(-[a-z0-9]+)?$');
+    if (sizePattern.hasMatch(url)) {
+      return url.replaceAll(sizePattern, '=s$size-c');
+    }
+    // Kalau backend sudah menyimpan ulang foto ini sendiri (bukan link
+    // langsung dari Google), parameter ukuran ini tidak akan ada, berarti
+    // sumber resolusi rendahnya ada di sisi server, bukan di aplikasi ini.
+    return url;
+  }
+
+  /// ================= BUKA FOTO PROFIL SECARA FULLSCREEN =================
+  /// Ketuk avatar di header sidebar -> layar hitam + foto besar dengan
+  /// pinch-to-zoom & double-tap zoom. Hanya aktif kalau ada foto asli dari
+  /// server (bukan foto default assets/anya.jpg), karena tidak ada gunanya
+  /// nge-zoom gambar placeholder.
+  void _openAvatarViewer() {
+    if (_avatarUrl == null || _avatarUrl!.isEmpty) return;
+
+    final hiResUrl = _hiResAvatarUrl(_avatarUrl, size: 720) ?? _avatarUrl!;
+
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return FadeTransition(
+            opacity: animation,
+            child: _ZoomableImageViewer(
+              networkUrl: hiResUrl,
+              heroTag: _avatarHeroTag,
+              title: widget.userName,
+            ),
+          );
+        },
+      ),
+    );
   }
 
   /// Warna badge role, dibedakan per peran biar gampang dikenali sekilas.
@@ -141,6 +193,8 @@ class _SidebarState extends State<Sidebar> {
     final String uniqueChatId =
         'room_user_${widget.userEmail.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
 
+    final bool hasAvatar = _avatarUrl != null && _avatarUrl!.isNotEmpty;
+
     return Drawer(
       backgroundColor: _bgColor,
       child: SafeArea(
@@ -160,19 +214,48 @@ class _SidebarState extends State<Sidebar> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                    ),
-                    child: CircleAvatar(
-                      radius: 26,
-                      backgroundColor: Colors.blue.withOpacity(0.08),
-                      backgroundImage:
-                          _avatarUrl != null && _avatarUrl!.isNotEmpty
-                              ? NetworkImage(_avatarUrl!) as ImageProvider
-                              : const AssetImage("assets/anya.jpg"),
+                  GestureDetector(
+                    onTap: hasAvatar ? _openAvatarViewer : null,
+                    child: Stack(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white,
+                          ),
+                          child: Hero(
+                            tag: _avatarHeroTag,
+                            child: CircleAvatar(
+                              radius: 26,
+                              backgroundColor: Colors.blue.withOpacity(0.08),
+                              backgroundImage: hasAvatar
+                                  ? NetworkImage(_avatarUrl!) as ImageProvider
+                                  : const AssetImage("assets/anya.jpg"),
+                            ),
+                          ),
+                        ),
+                        // Indikator kecil "bisa di-zoom", hanya muncul kalau
+                        // ada foto asli (bukan foto default).
+                        if (hasAvatar)
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: _primaryColor,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 1.5),
+                              ),
+                              child: const Icon(
+                                Icons.zoom_in_rounded,
+                                size: 11,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -366,6 +449,109 @@ class _SidebarState extends State<Sidebar> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// ================= FULLSCREEN ZOOMABLE IMAGE VIEWER =================
+/// Pola yang sama dengan _ZoomableImageViewer di ProfilPage / CarDetailPage /
+/// ChatPage: pinch-to-zoom, drag, dan double-tap untuk zoom in/out. Khusus
+/// untuk gambar dari network (foto profil user selalu berasal dari server).
+class _ZoomableImageViewer extends StatefulWidget {
+  final String networkUrl;
+  final String heroTag;
+  final String title;
+
+  const _ZoomableImageViewer({
+    required this.networkUrl,
+    required this.heroTag,
+    required this.title,
+  });
+
+  @override
+  State<_ZoomableImageViewer> createState() => _ZoomableImageViewerState();
+}
+
+class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
+    with SingleTickerProviderStateMixin {
+  final TransformationController _controller = TransformationController();
+  TapDownDetails? _doubleTapDetails;
+  late final AnimationController _animController;
+  Animation<Matrix4>? _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    )..addListener(() {
+        if (_animation != null) {
+          _controller.value = _animation!.value;
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleDoubleTap() {
+    Matrix4 endMatrix;
+    final position = _doubleTapDetails?.localPosition ?? Offset.zero;
+
+    if (_controller.value != Matrix4.identity()) {
+      endMatrix = Matrix4.identity();
+    } else {
+      endMatrix = Matrix4.identity()
+        ..translate(-position.dx * 1.8, -position.dy * 1.8)
+        ..scale(2.8);
+    }
+
+    _animation = Matrix4Tween(begin: _controller.value, end: endMatrix)
+        .animate(CurveTween(curve: Curves.easeOut).animate(_animController));
+    _animController.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+      ),
+      body: GestureDetector(
+        onDoubleTapDown: (details) => _doubleTapDetails = details,
+        onDoubleTap: _handleDoubleTap,
+        child: Center(
+          child: Hero(
+            tag: widget.heroTag,
+            child: InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 5,
+              child: Image.network(
+                widget.networkUrl,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                errorBuilder: (context, error, stackTrace) => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    "Gagal memuat gambar",
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

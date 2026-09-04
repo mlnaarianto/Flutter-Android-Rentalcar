@@ -26,6 +26,9 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController _scrollController = ScrollController();
   bool _hasText = false;
 
+  // Tag unik untuk animasi Hero foto profil di AppBar -> fullscreen viewer
+  static const String _avatarHeroTag = 'chat-receiver-avatar';
+
   // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _bgColor = Color(0xFFF4F6F9);
@@ -101,6 +104,25 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  /// ================= FIX FOTO GOOGLE BURAM/PIXELATED =================
+  /// Kalau foto profil berasal dari Google Sign-In, URL-nya biasanya sudah
+  /// dibatasi ukurannya kecil (mis. diakhiri "=s96-c" -> cuma 96x96px).
+  /// Di avatar kecil AppBar ini tidak kelihatan, tapi begitu di-stretch ke
+  /// viewer fullscreen jadi buram/pecah. Solusinya: ganti angka ukuran di
+  /// URL-nya jadi lebih besar sebelum dipakai untuk viewer full-screen.
+  /// Sama persis dengan yang dipakai di ProfilPage.
+  String? _hiResAvatarUrl(String? url, {int size = 720}) {
+    if (url == null || url.isEmpty) return url;
+    final sizePattern = RegExp(r'=s\d+-c(-[a-z0-9]+)?$');
+    if (sizePattern.hasMatch(url)) {
+      return url.replaceAll(sizePattern, '=s$size-c');
+    }
+    // Kalau backend sudah menyimpan ulang foto ini sendiri (bukan link
+    // langsung dari Google), parameter ukuran ini tidak akan ada, berarti
+    // sumber resolusi rendahnya ada di sisi server, bukan di aplikasi ini.
+    return url;
+  }
+
   /// Ambil inisial nama untuk avatar bulat kalau tidak ada foto profil
   String _initials(String name) {
     final trimmed = name.trim();
@@ -126,8 +148,45 @@ class _ChatPageState extends State<ChatPage> {
     return '${date.day} ${bulan[date.month - 1]} ${date.year}';
   }
 
+  /// ================= BUKA FOTO PROFIL LAWAN CHAT SECARA FULLSCREEN =================
+  /// Sama seperti WhatsApp: ketuk foto profil di AppBar -> layar hitam +
+  /// foto besar dengan pinch-to-zoom & double-tap zoom.
+  /// Hanya aktif kalau ada foto asli (bukan cuma inisial), karena tidak ada
+  /// gunanya membuka viewer kalau isinya cuma huruf.
+  void _openAvatarViewer() {
+    final url = widget.receiverAvatarUrl;
+    if (url == null || url.isEmpty) return;
+
+    // Pakai versi resolusi tinggi (720px) khusus untuk viewer fullscreen
+    // supaya tetap tajam walau di-zoom, meskipun avatar kecil di AppBar
+    // pakai resolusi standar.
+    final hiResUrl = _hiResAvatarUrl(url, size: 720) ?? url;
+
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        transitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return FadeTransition(
+            opacity: animation,
+            child: _ZoomableImageViewer(
+              networkUrl: hiResUrl,
+              heroTag: _avatarHeroTag,
+              title: widget.receiverName,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bool hasAvatar =
+        widget.receiverAvatarUrl != null && widget.receiverAvatarUrl!.isNotEmpty;
+
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
@@ -137,24 +196,28 @@ class _ChatPageState extends State<ChatPage> {
         titleSpacing: 0,
         title: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Colors.white.withOpacity(0.2),
-              backgroundImage: (widget.receiverAvatarUrl != null &&
-                      widget.receiverAvatarUrl!.isNotEmpty)
-                  ? NetworkImage(widget.receiverAvatarUrl!)
-                  : null,
-              child: (widget.receiverAvatarUrl == null ||
-                      widget.receiverAvatarUrl!.isEmpty)
-                  ? Text(
-                      _initials(widget.receiverName),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    )
-                  : null,
+            GestureDetector(
+              onTap: hasAvatar ? _openAvatarViewer : null,
+              child: Hero(
+                tag: _avatarHeroTag,
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                  backgroundImage: hasAvatar
+                      ? NetworkImage(widget.receiverAvatarUrl!)
+                      : null,
+                  child: !hasAvatar
+                      ? Text(
+                          _initials(widget.receiverName),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        )
+                      : null,
+                ),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -431,6 +494,109 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// ================= FULLSCREEN ZOOMABLE IMAGE VIEWER =================
+/// Pola yang sama dengan _ZoomableImageViewer di ProfilPage / CarDetailPage:
+/// pinch-to-zoom, drag, dan double-tap untuk zoom in/out. Khusus untuk
+/// gambar dari network (foto profil lawan chat selalu berasal dari server).
+class _ZoomableImageViewer extends StatefulWidget {
+  final String networkUrl;
+  final String heroTag;
+  final String title;
+
+  const _ZoomableImageViewer({
+    required this.networkUrl,
+    required this.heroTag,
+    required this.title,
+  });
+
+  @override
+  State<_ZoomableImageViewer> createState() => _ZoomableImageViewerState();
+}
+
+class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
+    with SingleTickerProviderStateMixin {
+  final TransformationController _controller = TransformationController();
+  TapDownDetails? _doubleTapDetails;
+  late final AnimationController _animController;
+  Animation<Matrix4>? _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    )..addListener(() {
+        if (_animation != null) {
+          _controller.value = _animation!.value;
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleDoubleTap() {
+    Matrix4 endMatrix;
+    final position = _doubleTapDetails?.localPosition ?? Offset.zero;
+
+    if (_controller.value != Matrix4.identity()) {
+      endMatrix = Matrix4.identity();
+    } else {
+      endMatrix = Matrix4.identity()
+        ..translate(-position.dx * 1.8, -position.dy * 1.8)
+        ..scale(2.8);
+    }
+
+    _animation = Matrix4Tween(begin: _controller.value, end: endMatrix)
+        .animate(CurveTween(curve: Curves.easeOut).animate(_animController));
+    _animController.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+      ),
+      body: GestureDetector(
+        onDoubleTapDown: (details) => _doubleTapDetails = details,
+        onDoubleTap: _handleDoubleTap,
+        child: Center(
+          child: Hero(
+            tag: widget.heroTag,
+            child: InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 5,
+              child: Image.network(
+                widget.networkUrl,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                errorBuilder: (context, error, stackTrace) => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    "Gagal memuat gambar",
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
