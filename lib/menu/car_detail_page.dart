@@ -6,6 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/booking_form_page.dart';
@@ -455,6 +458,27 @@ class _CarDetailPageState extends State<CarDetailPage> {
     final ownerAddress =
         personalData != null ? (personalData['address'] ?? '-') : '-';
 
+    // ============ DATA LOKASI USAHA (dari relasi user.rental_application) ============
+    final rentalApplication =
+        ownerData != null ? ownerData['rental_application'] : null;
+    final businessName = rentalApplication != null
+        ? (rentalApplication['business_name']?.toString() ?? '')
+        : '';
+    final businessAddress = rentalApplication != null
+        ? (rentalApplication['formatted_address']?.toString() ??
+            rentalApplication['business_address']?.toString() ??
+            '')
+        : '';
+    final double? businessLat =
+        rentalApplication != null && rentalApplication['latitude'] != null
+            ? double.tryParse(rentalApplication['latitude'].toString())
+            : null;
+    final double? businessLng =
+        rentalApplication != null && rentalApplication['longitude'] != null
+            ? double.tryParse(rentalApplication['longitude'].toString())
+            : null;
+    final bool hasLocation = businessLat != null && businessLng != null;
+
     final status = _car?['status'] ?? '';
     final driverPrice = _car?['driver_price_per_day'] ?? 0;
 
@@ -468,8 +492,19 @@ class _CarDetailPageState extends State<CarDetailPage> {
               ? _buildErrorState()
               : _car == null
                   ? _buildEmptyState()
-                  : _buildContent(status, driverPrice, ownerName, ownerEmail,
-                      ownerPhone, ownerAddress),
+                  : _buildContent(
+                      status,
+                      driverPrice,
+                      ownerName,
+                      ownerEmail,
+                      ownerPhone,
+                      ownerAddress,
+                      businessName,
+                      businessAddress,
+                      businessLat,
+                      businessLng,
+                      hasLocation,
+                    ),
       bottomNavigationBar: _isLoading || _car == null || _errorMessage != null
           ? null
           : _buildBottomBar(status),
@@ -745,8 +780,18 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   /// ================= KONTEN UTAMA =================
-  Widget _buildContent(String status, dynamic driverPrice, String ownerName,
-      String ownerEmail, String ownerPhone, String ownerAddress) {
+  Widget _buildContent(
+      String status,
+      dynamic driverPrice,
+      String ownerName,
+      String ownerEmail,
+      String ownerPhone,
+      String ownerAddress,
+      String businessName,
+      String businessAddress,
+      double? businessLat,
+      double? businessLng,
+      bool hasLocation) {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _buildHeaderImage()),
@@ -779,6 +824,25 @@ class _CarDetailPageState extends State<CarDetailPage> {
                     ),
                   ],
                 ),
+
+                // ============ LOKASI USAHA (MAP) ============
+                if (hasLocation || businessName.isNotEmpty)
+                  _sectionCard(
+                    title: 'Lokasi Usaha',
+                    subtitle: businessName.isNotEmpty
+                        ? businessName
+                        : 'Titik lokasi rental di peta',
+                    icon: Icons.storefront_rounded,
+                    iconColor: _accentColor,
+                    children: [
+                      _buildBusinessLocationSection(
+                        businessAddress,
+                        businessLat,
+                        businessLng,
+                        hasLocation,
+                      ),
+                    ],
+                  ),
 
                 // ============ SPESIFIKASI ============
                 _sectionCard(
@@ -840,6 +904,111 @@ class _CarDetailPageState extends State<CarDetailPage> {
         ),
       ],
     );
+  }
+
+  /// ================= LOKASI USAHA (MAP PREVIEW + TOMBOL) =================
+  /// Map ditampilkan non-interaktif (IgnorePointer + InteractiveFlag.none)
+  /// supaya tidak konflik gesture scroll dengan CustomScrollView halaman ini.
+  /// Untuk navigasi/detail, user diarahkan ke Google Maps lewat tombol.
+  Widget _buildBusinessLocationSection(
+      String businessAddress, double? lat, double? lng, bool hasLocation) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasLocation)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(
+              height: 180,
+              width: double.infinity,
+              child: IgnorePointer(
+                child: FlutterMap(
+                  options: MapOptions(
+                    initialCenter: LatLng(lat!, lng!),
+                    initialZoom: 15.0,
+                    interactionOptions: const InteractionOptions(
+                      flags: InteractiveFlag.none,
+                    ),
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.example.rentalcar',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: LatLng(lat, lng),
+                          width: 40,
+                          height: 40,
+                          child: const Icon(
+                            Icons.location_pin,
+                            color: Colors.red,
+                            size: 40,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (businessAddress.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _infoTile(Icons.location_on_outlined, 'Alamat Usaha', businessAddress),
+        ],
+        if (hasLocation) ...[
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _openInGoogleMaps(lat!, lng!),
+              icon: const Icon(Icons.map_outlined, size: 18),
+              label: const Text('Buka di Google Maps'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primaryColor,
+                side: BorderSide(color: _primaryColor.withOpacity(0.4)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Buka lokasi di aplikasi Google Maps (kalau ada) dengan pin tepat di
+  /// titik lokasi usaha, mirip perilaku app driver/ojek online.
+  /// Pakai skema geo: dulu (native Android, langsung buka app Maps),
+  /// fallback ke URL web Google Maps kalau geo: gagal/tidak didukung.
+  Future<void> _openInGoogleMaps(double lat, double lng) async {
+    final label = Uri.encodeComponent(_car?['name'] ?? 'Lokasi Usaha');
+
+    final geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng($label)');
+    final webUri = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+
+    try {
+      final launched = await launchUrl(
+        geoUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tidak dapat membuka aplikasi Maps.')),
+          );
+        }
+      }
+    }
   }
 
   /// ================= VIDEO SECTION (isi dari card, sudah dibungkus rounded) =================

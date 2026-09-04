@@ -11,6 +11,10 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- 👇 TAMBAHKAN IZIN LOKASI DI SINI AGAR GEOLOCATOR TIDAK ERROR -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <application
         android:enableOnBackInvokedCallback="true"
         android:label="rentalcar"
@@ -18,7 +22,6 @@
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
         
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -49,6 +52,27 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+
+        <!-- 👇 TAMBAHAN: supaya bisa buka Google Maps app via skema geo: -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+
+        <!-- 👇 TAMBAHAN: supaya bisa buka link https:// (fallback web maps, dsb) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+
+        <!-- 👇 TAMBAHAN: supaya bisa buka navigasi turn-by-turn via google.navigation: -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="google.navigation" />
+        </intent>
+
+        <!-- 👇 TAMBAHAN: pastikan sistem "melihat" package Google Maps -->
+        <package android:name="com.google.android.apps.maps" />
     </queries>
 
 </manifest>

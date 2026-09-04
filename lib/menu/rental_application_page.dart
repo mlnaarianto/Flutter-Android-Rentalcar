@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 
 class RentalApplicationPage extends StatefulWidget {
   const RentalApplicationPage({super.key});
@@ -21,6 +24,13 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
   String? _adminNotes;
   bool _isLoading = true;
   bool _isSubmitting = false;
+  bool _isGeocoding = false;
+
+  // Variabel Peta & Koordinat (Default: Batam)
+  double _latitude = 1.1301;
+  double _longitude = 104.0530;
+  final MapController _mapController = MapController();
+  bool _hasSelectedLocation = false;
 
   // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
   static const Color _primaryColor = Color(0xFF2563EB);
@@ -68,6 +78,12 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
             _businessAddressController.text = appData['business_address'] ?? '';
             _status = appData['status'] ?? 'pending';
             _adminNotes = appData['admin_notes'];
+
+            if (appData['latitude'] != null && appData['longitude'] != null) {
+              _latitude = double.parse(appData['latitude'].toString());
+              _longitude = double.parse(appData['longitude'].toString());
+              _hasSelectedLocation = true;
+            }
           });
         }
       }
@@ -78,9 +94,91 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     }
   }
 
+  /// Panggil Endpoint Reverse Geocode ke Backend Laravel
+  Future<void> _reverseGeocode(double lat, double lng) async {
+    setState(() {
+      _latitude = lat;
+      _longitude = lng;
+      _hasSelectedLocation = true;
+      _isGeocoding = true;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? token = prefs.getString('access_token');
+
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/rental-application/reverse-geocode?latitude=$lat&longitude=$lng'),
+        headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        final addressData = responseData['data'];
+        
+        if (addressData != null && addressData['formatted_address'] != null) {
+          String formattedAddress = addressData['formatted_address'];
+          setState(() {
+            _businessAddressController.text = formattedAddress;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Gagal reverse geocode: $e');
+    } finally {
+      if (mounted) setState(() => _isGeocoding = false);
+    }
+  }
+
+  /// Ambil lokasi GPS perangkat saat ini menggunakan Geolocator
+  Future<void> _getCurrentLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _showSnackBar('Layanan GPS/Lokasi tidak aktif.', _dangerColor);
+      return;
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        _showSnackBar('Izin lokasi ditolak.', _dangerColor);
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      _showSnackBar('Izin lokasi ditolak secara permanen.', _dangerColor);
+      return;
+    }
+
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      LatLng currentLatLng = LatLng(position.latitude, position.longitude);
+      _mapController.move(currentLatLng, 16.0);
+      await _reverseGeocode(position.latitude, position.longitude);
+    } catch (e) {
+      _showSnackBar('Gagal mendapatkan lokasi GPS.', _dangerColor);
+    }
+  }
+
   /// Kirim / Update Pengajuan ke Backend API
   Future<void> _submitApplication() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (!_hasSelectedLocation) {
+      _showSnackBar('Silakan tandai lokasi usaha Anda di peta terlebih dahulu.', _dangerColor);
+      return;
+    }
 
     setState(() => _isSubmitting = true);
 
@@ -98,6 +196,9 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
         body: jsonEncode({
           'business_name': _businessNameController.text,
           'business_address': _businessAddressController.text,
+          'latitude': _latitude,
+          'longitude': _longitude,
+          'formatted_address': _businessAddressController.text,
         }),
       );
 
@@ -222,7 +323,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                       const SizedBox(height: 14),
                       _buildInfoBanner(),
                       const SizedBox(height: 20),
-                      _buildSectionTitle('Data Usaha'),
+                      _buildSectionTitle('Data Usaha & Lokasi Peta'),
                       const SizedBox(height: 10),
                       _buildFormCard(),
                       const SizedBox(height: 24),
@@ -399,7 +500,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     );
   }
 
-  // ================= CARD: FORM =================
+  // ================= CARD: FORM & PETA =================
   Widget _buildFormCard() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -415,16 +516,127 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildTextField(
             controller: _businessNameController,
             label: 'Nama Usaha Rental (Opsional)',
             icon: Icons.store_outlined,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          
+          // Widget Peta Flutter Map
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Tandai Lokasi Usaha di Peta *',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+              ),
+              TextButton.icon(
+                onPressed: _getCurrentLocation,
+                icon: const Icon(Icons.my_location, size: 14),
+                label: const Text('Lokasi Saya', style: TextStyle(fontSize: 11.5)),
+                style: TextButton.styleFrom(foregroundColor: _primaryColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          
+          Container(
+            height: 250,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: Stack(
+              children: [
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: LatLng(_latitude, _longitude),
+                    initialZoom: 14.0,
+                    onTap: (tapPosition, point) {
+                      _reverseGeocode(point.latitude, point.longitude);
+                    },
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.example.rentalcar',
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: LatLng(_latitude, _longitude),
+                          width: 40,
+                          height: 40,
+                          child: const Icon(
+                            Icons.location_pin,
+                            color: Colors.red,
+                            size: 40,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                
+                // ➕ ➖ Tombol Zoom In / Zoom Out di Pojok Kanan Bawah Peta
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: Column(
+                    children: [
+                      FloatingActionButton.small(
+                        heroTag: 'zoom_in',
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        onPressed: () {
+                          final currentZoom = _mapController.camera.zoom;
+                          _mapController.move(_mapController.camera.center, currentZoom + 1);
+                        },
+                        child: const Icon(Icons.add, size: 20),
+                      ),
+                      const SizedBox(height: 4),
+                      FloatingActionButton.small(
+                        heroTag: 'zoom_out',
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        onPressed: () {
+                          final currentZoom = _mapController.camera.zoom;
+                          _mapController.move(_mapController.camera.center, currentZoom - 1);
+                        },
+                        child: const Icon(Icons.remove, size: 20),
+                      ),
+                    ],
+                  ),
+                ),
+
+                if (_isGeocoding)
+                  Container(
+                    color: Colors.black.withOpacity(0.2),
+                    child: const Center(
+                      child: CircularProgressIndicator(color: _primaryColor),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _hasSelectedLocation 
+                ? 'Koordinat: ${_latitude.toStringAsFixed(5)}, ${_longitude.toStringAsFixed(5)}'
+                : 'Ketuk pada peta untuk menandai titik lokasi usaha Anda.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 16),
+
           _buildTextField(
             controller: _businessAddressController,
-            label: 'Alamat Usaha / Domisili',
+            label: 'Alamat Usaha / Domisili (Auto-fill dari Peta)',
             icon: Icons.location_on_outlined,
             maxLines: 3,
             validator: (v) =>
