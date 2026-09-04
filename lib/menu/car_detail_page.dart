@@ -1481,10 +1481,16 @@ class YoutubePopupPlayer extends StatefulWidget {
 
 class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   late YoutubePlayerController _controller;
+  bool _isDisposed = false;
 
   @override
   void initState() {
     super.initState();
+    _initController();
+  }
+
+  void _initController() {
+    // Selalu buat instance controller baru yang bersih setiap kali widget dipasang/dibuka
     _controller = YoutubePlayerController.fromVideoId(
       videoId: widget.youtubeId,
       autoPlay: true,
@@ -1492,55 +1498,90 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
         showFullscreenButton: true,
         showControls: true,
         strictRelatedVideos: true,
+        enableJavaScript: true,
       ),
     );
 
-    _controller.setFullScreenListener((isFullScreen) {
+    // Perhalus transisi orientasi dengan sedikit jeda agar tidak lag/freeze
+    _controller.setFullScreenListener((isFullScreen) async {
+      if (_isDisposed) return;
+      
       if (isFullScreen) {
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (!_isDisposed) {
+          SystemChrome.setPreferredOrientations([
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]);
+        }
       } else {
         SystemChrome.setPreferredOrientations([
           DeviceOrientation.portraitUp,
           DeviceOrientation.portraitDown,
         ]);
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (!_isDisposed) {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        }
       }
     });
   }
 
   Future<void> _openInYouTubeApp() async {
-    // Mengambil waktu pemutaran via Future getter .currentTime di versi 6.0.2
-    final double currentSeconds = await _controller.currentTime;
-    final int secondsInt = currentSeconds.floor();
-
-    final String urlString = secondsInt > 1
-        ? 'https://www.youtube.com/watch?v=${widget.youtubeId}&t=${secondsInt}s'
-        : 'https://www.youtube.com/watch?v=${widget.youtubeId}';
-
-    final youtubeUrl = Uri.parse(urlString);
-    
     try {
-      await launchUrl(youtubeUrl, mode: LaunchMode.externalApplication);
-    } catch (_) {
+      double currentSeconds = 0;
+      try {
+        currentSeconds = await _controller.currentTime;
+      } catch (_) {
+        currentSeconds = 0;
+      }
+      
+      final int secondsInt = currentSeconds.floor();
+
+      final String urlString = secondsInt > 1
+          ? 'https://www.youtube.com/watch?v=${widget.youtubeId}&t=${secondsInt}s'
+          : 'https://www.youtube.com/watch?v=${widget.youtubeId}';
+
+      final youtubeUrl = Uri.parse(urlString);
+
+      final launched = await launchUrl(
+        youtubeUrl,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        _showErrorSnackBar('Tidak dapat membuka aplikasi YouTube.');
+      }
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tidak dapat membuka YouTube.')),
-        );
+        _showErrorSnackBar('Terjadi kesalahan saat membuka YouTube.');
       }
     }
   }
 
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   @override
   void dispose() {
-    _controller.close();
+    _isDisposed = true;
+    
+    // Kembalikan orientasi layar ke portrait
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    
+    // Tutup controller secara aman untuk membersihkan resource WebView di memori
+    try {
+      _controller.close();
+    } catch (_) {}
+    
     super.dispose();
   }
 
