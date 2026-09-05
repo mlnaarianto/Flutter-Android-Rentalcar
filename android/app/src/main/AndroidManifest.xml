@@ -11,13 +11,18 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- 👇 TAMBAHAN: izin notifikasi sistem (WAJIB untuk Android 13+ / API 33+,
+         tanpa ini show() dari flutter_local_notifications tidak akan
+         menampilkan apapun meskipun tidak ada error) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- 👇 TAMBAHKAN IZIN LOKASI DI SINI AGAR GEOLOCATOR TIDAK ERROR -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:enableOnBackInvokedCallback="true"
-        android:label="rentalcar"
+        android:label="Rentalcar"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

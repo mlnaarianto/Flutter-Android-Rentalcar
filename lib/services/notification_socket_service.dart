@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:rentalcar/config/api_config.dart';
 
 /// Service singleton untuk koneksi real-time ke Reverb.
@@ -14,21 +15,11 @@ import 'package:rentalcar/config/api_config.dart';
 /// Dengan singleton, koneksi dibuka SEKALI saat user login, lalu tetap
 /// hidup sepanjang sesi app, dan seluruh halaman tinggal "dengarkan"
 /// statusnya tanpa perlu buka koneksi baru.
-///
-/// 🟢 PERBAIKAN DI VERSI INI:
-/// 1. Socket yang putus (error/onDone) sekarang otomatis reconnect
-///    dengan backoff, bukan mati total sampai app di-restart.
-/// 2. `_checkInitialUnreadStatus` (yang menimpa `hasUnread` dari status
-///    `is_read` di backend) HANYA dipanggil saat benar-benar koneksi
-///    pertama untuk user ini (login / cold start) — bukan setiap kali
-///    reconnect di sesi yang sama. Ini mencegah badge "nyala lagi"
-///    kalau request read-all sebelumnya sempat gagal/telat sinkron.
-/// 3. `markAsSeen()` sekarang juga dipanggil dari `NotifikasiPage`
-///    HANYA setelah read-all ke backend benar-benar sukses (lihat
-///    notifikasi.dart), supaya state lokal & backend tidak pernah
-///    "beda cerita".
 class NotificationSocketService {
-  NotificationSocketService._internal();
+  NotificationSocketService._internal() {
+    _initLocalNotifications();
+  }
+
   static final NotificationSocketService _instance =
       NotificationSocketService._internal();
   factory NotificationSocketService() => _instance;
@@ -37,20 +28,15 @@ class NotificationSocketService {
   StreamSubscription? _wsSubscription;
   String? _socketId;
   bool _isConnected = false;
-  bool _isConnecting = false; // 🟢 cegah connect() dipanggil dobel bersamaan
+  bool _isConnecting = false;
   String? _connectedUserId;
 
-  // 🟢 Reconnect dengan backoff, supaya kalau server/jaringan sempat
-  // putus, koneksi otomatis pulih tanpa perlu restart app.
   Timer? _reconnectTimer;
   int _reconnectAttempt = 0;
   static const List<int> _backoffSeconds = [2, 4, 8, 15, 30, 60];
 
-  // Status unread yang didengarkan Navbar.
   final ValueNotifier<bool> hasUnread = ValueNotifier<bool>(false);
 
-  // Stream notifikasi baru — didengarkan NotifikasiPage untuk
-  // menambahkan item baru ke list tanpa perlu bikin koneksi sendiri lagi.
   final StreamController<Map<String, dynamic>> _newNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get onNewNotification =>
@@ -58,9 +44,68 @@ class NotificationSocketService {
 
   bool get isConnected => _isConnected;
 
-  /// Panggil ini SEKALI setelah login berhasil (dan idealnya juga saat
-  /// app dibuka dengan sesi yang masih aktif). Aman dipanggil berkali-kali
-  /// — kalau sudah connect untuk user yang sama, tidak akan connect ulang.
+  final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+
+  /// Inisialisasi setting local notifications untuk Android & iOS.
+  ///
+  /// PENTING: nama parameternya adalah `settings` (dikonfirmasi dari source
+  /// code resmi paket ini), bukan `initSettings` maupun `initializationSettings`.
+  Future<void> _initLocalNotifications() async {
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const InitializationSettings initializationSettings =
+        InitializationSettings(
+      android: initializationSettingsAndroid,
+    );
+
+    await _localNotificationsPlugin.initialize(
+      settings: initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        debugPrint('Notifikasi di-tap: ${response.payload}');
+      },
+    );
+
+    // Android 13+ (API 33) mewajibkan izin runtime untuk menampilkan
+    // notifikasi sistem. Tanpa ini, show() akan gagal diam-diam
+    // (tidak ada error, tapi notifikasi tidak pernah muncul).
+    await _localNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+  }
+
+  /// Menampilkan banner pop-up notifikasi di luar aplikasi (Status Bar).
+  ///
+  /// PENTING: mulai flutter_local_notifications v22, show() memakai
+  /// NAMED parameter untuk id, title, body, dan notificationDetails.
+  Future<void> _showSystemNotification(String title, String body) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+      'rental_car_channel_id',
+      'Aktivitas Rental',
+      channelDescription:
+          'Notifikasi status pesanan dan aktivitas rental mobil',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    try {
+      await _localNotificationsPlugin.show(
+        id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        title: title,
+        body: body,
+        notificationDetails: platformChannelSpecifics,
+      );
+    } catch (e) {
+      debugPrint('Gagal menampilkan local notification: $e');
+    }
+  }
+
   Future<void> connect() async {
     if (_isConnecting) {
       debugPrint('Reverb Service: sedang proses connect, skip panggilan dobel.');
@@ -89,11 +134,6 @@ class NotificationSocketService {
 
     _isConnecting = true;
 
-    // 🟢 Hanya cek status unread awal dari backend kalau ini memang
-    // koneksi pertama untuk user ini (belum pernah connect di sesi
-    // app ini, atau baru ganti user). Reconnect biasa (mis. jaringan
-    // sempat putus lalu nyambung lagi) TIDAK menimpa `hasUnread` yang
-    // sudah kita jaga secara lokal.
     final isFirstConnectForUser = _connectedUserId != userId;
     if (isFirstConnectForUser) {
       await _checkInitialUnreadStatus(token);
@@ -123,7 +163,7 @@ class NotificationSocketService {
       _wsChannel = WebSocketChannel.connect(wsUri);
       _isConnected = true;
       _connectedUserId = userId;
-      _reconnectAttempt = 0; // reset backoff setelah berhasil connect
+      _reconnectAttempt = 0;
 
       _wsSubscription = _wsChannel!.stream.listen(
         (raw) => _handleMessage(raw, userId, token, apiUri),
@@ -148,8 +188,6 @@ class NotificationSocketService {
     }
   }
 
-  /// 🟢 Reconnect otomatis dengan backoff bertahap (2s, 4s, 8s, ... maks 60s).
-  /// Dipanggil setiap kali socket putus tak sengaja (bukan logout manual).
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
 
@@ -178,9 +216,7 @@ class NotificationSocketService {
         hasUnread.value =
             notifications.any((notif) => notif['is_read'] == false);
       }
-    } catch (_) {
-      // Abaikan, badge akan tetap terupdate lewat event realtime nanti
-    }
+    } catch (_) {}
   }
 
   void _handleMessage(
@@ -204,11 +240,15 @@ class NotificationSocketService {
         final payload = jsonDecode(msg['data']);
         final newNotif = payload['data'];
 
-        // Badge langsung nyala
+        // Badge navbar langsung menyala
         hasUnread.value = true;
 
-        // Teruskan ke halaman manapun yang sedang mendengarkan
-        // (misal NotifikasiPage kalau sedang terbuka)
+        // Tampilkan sistem pop-up notifikasi di luar aplikasi (Status Bar)
+        final title = newNotif['title'] ?? 'Informasi Rental';
+        final message = newNotif['message'] ?? 'Anda memiliki aktivitas baru.';
+        _showSystemNotification(title, message);
+
+        // Teruskan ke halaman yang sedang aktif mendengarkan (NotifikasiPage)
         _newNotificationController.add(newNotif);
       }
     } catch (e) {
@@ -264,9 +304,6 @@ class NotificationSocketService {
     }
   }
 
-  /// Tutup koneksi tanpa mereset status login (dipakai internal saat
-  /// ganti user). `resetUnread` opsional supaya badge langsung 0 saat
-  /// benar-benar ganti akun.
   void _hardDisconnect({bool resetUnread = false}) {
     _reconnectTimer?.cancel();
     _wsSubscription?.cancel();
@@ -277,17 +314,11 @@ class NotificationSocketService {
     if (resetUnread) hasUnread.value = false;
   }
 
-  /// Panggil ini saat user LOGOUT — supaya koneksi lama ditutup dan
-  /// tidak "menempel" ke sesi user berikutnya kalau ganti akun.
   void disconnect() {
     _hardDisconnect(resetUnread: true);
     debugPrint('Reverb Service: disconnected.');
   }
 
-  /// Panggil ini HANYA setelah backend benar-benar mengonfirmasi
-  /// notifikasi sudah ditandai read (lihat `NotifikasiPage`). Jangan
-  /// panggil ini secara optimis sebelum tahu hasil request ke server,
-  /// supaya badge lokal tidak pernah "berbohong" dibanding backend.
   void markAsSeen() {
     hasUnread.value = false;
   }

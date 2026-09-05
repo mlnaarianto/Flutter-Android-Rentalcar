@@ -1483,6 +1483,10 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   late YoutubePlayerController _controller;
   bool _isDisposed = false;
 
+  // 🔧 Guard untuk mencegah feedback loop fullscreen <-> orientasi
+  bool? _lastFullScreenState;
+  bool _isHandlingFullScreenChange = false;
+
   @override
   void initState() {
     super.initState();
@@ -1502,27 +1506,42 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
       ),
     );
 
-    // Perhalus transisi orientasi dengan sedikit jeda agar tidak lag/freeze
     _controller.setFullScreenListener((isFullScreen) async {
       if (_isDisposed) return;
-      
-      if (isFullScreen) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (!_isDisposed) {
-          SystemChrome.setPreferredOrientations([
+
+      // 1) Abaikan event duplikat/gema dengan value yang sama persis
+      if (_lastFullScreenState == isFullScreen) return;
+
+      // 2) Cegah proses tumpang tindih saat transisi sebelumnya masih berjalan
+      if (_isHandlingFullScreenChange) return;
+
+      _isHandlingFullScreenChange = true;
+      _lastFullScreenState = isFullScreen;
+
+      try {
+        if (isFullScreen) {
+          await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (_isDisposed) return;
+          await SystemChrome.setPreferredOrientations([
             DeviceOrientation.landscapeLeft,
             DeviceOrientation.landscapeRight,
           ]);
+        } else {
+          await SystemChrome.setPreferredOrientations([
+            DeviceOrientation.portraitUp,
+            DeviceOrientation.portraitDown,
+          ]);
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (_isDisposed) return;
+          await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         }
-      } else {
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.portraitDown,
-        ]);
-        await Future.delayed(const Duration(milliseconds: 50));
+      } finally {
+        // 3) Beri jeda sebelum listener "siap" lagi, supaya gema resize
+        //    dari WebView tidak langsung memicu ulang perubahan orientasi
+        await Future.delayed(const Duration(milliseconds: 400));
         if (!_isDisposed) {
-          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+          _isHandlingFullScreenChange = false;
         }
       }
     });
@@ -1530,14 +1549,33 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
 
   Future<void> _openInYouTubeApp() async {
     try {
+      // 1) Ambil posisi tonton dulu, SEBELUM player di-pause/di-reset
       double currentSeconds = 0;
       try {
         currentSeconds = await _controller.currentTime;
       } catch (_) {
         currentSeconds = 0;
       }
-      
       final int secondsInt = currentSeconds.floor();
+
+      // 2) Pause video supaya WebView tidak terus render/decode di background
+      try {
+        await _controller.pauseVideo();
+      } catch (_) {}
+
+      // 3) Reset orientasi & system UI ke kondisi normal SEBELUM pindah app
+      //    (kalau masih immersive/landscape, YouTube app bisa render blank sesaat)
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+
+      // 4) PERBAIKAN: Diperpanjang menjadi 300ms agar OS Android benar-benar 
+      //    selesai menerapkan perubahan UI/orientasi sebelum app lain dibuka
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      if (_isDisposed || !mounted) return;
 
       final String urlString = secondsInt > 1
           ? 'https://www.youtube.com/watch?v=${widget.youtubeId}&t=${secondsInt}s'
@@ -1569,19 +1607,22 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   @override
   void dispose() {
     _isDisposed = true;
-    
-    // Kembalikan orientasi layar ke portrait
+
+    // Kembalikan orientasi layar ke portrait terlebih dahulu
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    
-    // Tutup controller secara aman untuk membersihkan resource WebView di memori
-    try {
-      _controller.close();
-    } catch (_) {}
-    
+
+    // PERBAIKAN: Gunakan Future.microtask untuk menutup controller secara aman 
+    // agar WebView tidak terpotong mendadak saat animasi tutup bottom sheet berjalan
+    Future.microtask(() {
+      try {
+        _controller.close();
+      } catch (_) {}
+    });
+
     super.dispose();
   }
 
