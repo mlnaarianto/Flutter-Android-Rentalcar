@@ -42,7 +42,7 @@ dependencies:
 
   # Tambahkan dua baris ini untuk Firebase & Firestore
   firebase_core: ^3.6.0
-  cloud_firestore: ^5.4.4
+  firebase_messaging: ^15.2.10 # 🟢 TAMBAHAN: push notification (FCM) saat app tertutup
 
   url_launcher: ^6.2.5
   video_player: ^2.9.5

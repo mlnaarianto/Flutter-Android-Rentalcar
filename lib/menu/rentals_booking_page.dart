@@ -359,7 +359,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   }
 
   // Navigasi ke Halaman Chat Perental <-> Penyewa
-  void _openChatWithRenter(Map<String, dynamic> renter) {
+  void _openChatWithRenter(Map<String, dynamic> renter) async {
     final String renterId = renter['id']?.toString() ?? '';
     final String renterName = renter['name'] ?? 'Penyewa';
     final String? renterAvatar = renter['avatar']?.toString();
@@ -369,7 +369,12 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       return;
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token') ?? '';
+
     final String uniqueChatId = 'room_rental_${_currentUserId}_user_$renterId';
+
+    if (!mounted) return;
 
     Navigator.push(
       context,
@@ -378,15 +383,17 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '3',
           currentUserName: _currentUserName ?? AppRole.perental.value,
+          receiverId: renterId,
           receiverName: "Penyewa: $renterName",
           receiverAvatarUrl: renterAvatar,
+          authToken: token,
         ),
       ),
     );
   }
 
   // Navigasi ke Halaman Chat Perental <-> Driver
-  void _openChatWithDriver(Map<String, dynamic> driver) {
+  void _openChatWithDriver(Map<String, dynamic> driver) async {
     final String driverId = driver['id']?.toString() ?? '';
     final String driverName = driver['name'] ?? 'Driver';
     final String? driverAvatar = driver['avatar']?.toString();
@@ -396,7 +403,12 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       return;
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token') ?? '';
+
     final String uniqueChatId = 'room_rental_${_currentUserId}_driver_$driverId';
+
+    if (!mounted) return;
 
     Navigator.push(
       context,
@@ -405,8 +417,10 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '3',
           currentUserName: _currentUserName ?? AppRole.perental.value,
+          receiverId: driverId,
           receiverName: "Driver: $driverName",
           receiverAvatarUrl: driverAvatar,
+          authToken: token,
         ),
       ),
     );

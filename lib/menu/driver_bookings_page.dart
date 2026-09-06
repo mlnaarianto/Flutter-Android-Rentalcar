@@ -95,7 +95,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
   }
 
   // Navigasi ke Halaman Chat Driver <-> Perental (Pemilik Rental)
-  void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) {
+  void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) async {
     final String ownerId = rentalOwner['id']?.toString() ?? '';
     final String ownerName = rentalOwner['name'] ?? 'Perental';
     final String? ownerAvatar = rentalOwner['avatar']?.toString();
@@ -105,9 +105,14 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
       return;
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token') ?? '';
+
     // Format unik room chat antara perental dan driver (harus sama persis dengan sisi perental)
     final String uniqueChatId =
         'room_rental_${ownerId}_driver_${_currentUserId}';
+
+    if (!mounted) return;
 
     Navigator.push(
       context,
@@ -116,8 +121,10 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '',
           currentUserName: _currentUserName ?? AppRole.driver.value,
+          receiverId: ownerId,
           receiverName: "Perental: $ownerName",
           receiverAvatarUrl: ownerAvatar,
+          authToken: token,
         ),
       ),
     );

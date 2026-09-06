@@ -354,8 +354,14 @@ class _SidebarState extends State<Sidebar> {
                     iconColor: _primaryColor,
                     title: 'Chat Admin',
                     subtitle: 'Hubungi customer service',
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(context);
+                      
+                      final prefs = await SharedPreferences.getInstance();
+                      final token = prefs.getString('access_token') ?? '';
+
+                      if (!context.mounted) return;
+
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -363,7 +369,9 @@ class _SidebarState extends State<Sidebar> {
                             chatId: uniqueChatId,
                             currentUserId: _userId ?? '3',
                             currentUserName: widget.userName,
+                            receiverId: '1', // ID Admin / CS (biasanya ID 1)
                             receiverName: "Admin Rental (CS)",
+                            authToken: token,
                           ),
                         ),
                       );

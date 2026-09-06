@@ -196,7 +196,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
-  void _openChatWithOwner(dynamic carData) {
+ void _openChatWithOwner(dynamic carData) async {
     if (carData == null) {
       _showSnackBar('Informasi kendaraan tidak tersedia.', Colors.red);
       return;
@@ -212,9 +212,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         ? ownerMap['name'].toString()
         : 'Perental';
 
-    // 👇 Foto profil perental (kalau backend menyertakan field 'avatar'
-    // pada objek user/owner). Kalau tidak ada, ChatPage otomatis fallback
-    // ke avatar inisial nama.
     final String? ownerAvatar =
         ownerMap != null ? ownerMap['avatar']?.toString() : null;
 
@@ -223,8 +220,13 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       return;
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token') ?? '';
+
     final String uniqueChatId =
         'room_rental_${ownerId}_user_${_currentUserId ?? '3'}';
+
+    if (!mounted) return;
 
     Navigator.push(
       context,
@@ -233,8 +235,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           chatId: uniqueChatId,
           currentUserId: _currentUserId ?? '3',
           currentUserName: _currentUserName ?? 'Penyewa',
+          receiverId: ownerId,
           receiverName: "Perental: $ownerName",
           receiverAvatarUrl: ownerAvatar,
+          authToken: token,
         ),
       ),
     );

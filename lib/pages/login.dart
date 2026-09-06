@@ -135,6 +135,11 @@ class _LoginPageState extends State<LoginPage> {
         // setelah token & user_id tersimpan ke SharedPreferences.
         // Sengaja tidak di-"await" — biar navigasi ke Dashboard tidak
         // ikut menunggu proses koneksi WebSocket selesai dulu.
+        //
+        // CATATAN: registrasi FCM token sekarang dilakukan otomatis DI
+        // DALAM connect() (lihat NotificationSocketService), bukan di
+        // sini lagi — supaya juga jalan saat app dibuka ulang dengan
+        // sesi lama, bukan cuma pas login baru seperti alur ini.
         NotificationSocketService().connect();
 
         // Navigasi ke Dashboard
