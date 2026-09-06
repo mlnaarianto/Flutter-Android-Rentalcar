@@ -47,7 +47,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     // koneksi WebSocket baru.
     _notifSubscription =
         NotificationSocketService().onNewNotification.listen((newNotif) {
-      debugPrint('NotifikasiPage: 🔔 notifikasi baru diterima: ${newNotif['title']}');
+      debugPrint(
+          'NotifikasiPage: 🔔 notifikasi baru diterima: ${newNotif['title']}');
 
       // Notifikasi masuk SAAT halaman ini terbuka — badge tetap padam
       // karena user memang sedang melihat halaman ini secara langsung.
@@ -113,7 +114,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         });
       } else {
         setState(() {
-          _errorMessage = 'Gagal memuat notifikasi (Kode: ${response.statusCode})';
+          _errorMessage =
+              'Gagal memuat notifikasi (Kode: ${response.statusCode})';
           _isLoading = false;
         });
       }
@@ -126,17 +128,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   }
 
   /// ================= TANDAI SUDAH DIBACA KE BACKEND =================
-  ///
-  /// 🟢 PERBAIKAN: sebelumnya kalau request ini gagal, error ditelan
-  /// diam-diam dan `is_read` di backend tetap `false` selamanya —
-  /// akibatnya badge merah bisa "nyala lagi" saat service melakukan
-  /// pengecekan status unread dari backend (misal setelah reconnect).
-  ///
-  /// Sekarang:
-  /// - Kalau sukses: update `is_read` di state lokal juga, supaya titik
-  ///   oranye per-item ikut hilang tanpa perlu fetch ulang.
-  /// - Kalau gagal: retry otomatis (maks 3x, dengan jeda), supaya
-  ///   backend akhirnya tetap sinkron begitu koneksi pulih.
   Future<void> _markNotificationsAsRead({int attempt = 0}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -176,13 +167,120 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   void _retryMarkAsRead(int attempt) {
     const maxAttempts = 3;
     if (attempt >= maxAttempts) {
-      debugPrint('NotifikasiPage: read-all menyerah setelah $maxAttempts percobaan.');
+      debugPrint(
+          'NotifikasiPage: read-all menyerah setelah $maxAttempts percobaan.');
       return;
     }
     final delay = Duration(seconds: 2 * (attempt + 1)); // 2s, 4s, 6s
     Timer(delay, () {
       if (mounted) _markNotificationsAsRead(attempt: attempt + 1);
     });
+  }
+
+  /// ================= 🟢 HAPUS SATU NOTIFIKASI =================
+  Future<void> _deleteSingleNotification(int index) async {
+    final deletedNotif = _notifications[index];
+    final notifId = deletedNotif['id'];
+
+    // 1. Optimistic UI update: Hapus dulu dari tampilan agar terasa cepat
+    setState(() {
+      _notifications.removeAt(index);
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/notifications/$notifId'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode != 200) {
+        // Jika gagal, kembalikan data ke dalam list
+        setState(() {
+          _notifications.insert(index, deletedNotif);
+        });
+        _showSnackBar('Gagal menghapus notifikasi.');
+      }
+    } catch (e) {
+      // Jika error koneksi, kembalikan data ke dalam list
+      setState(() {
+        _notifications.insert(index, deletedNotif);
+      });
+      _showSnackBar('Terjadi kesalahan koneksi.');
+    }
+  }
+
+  /// ================= 🟢 HAPUS SEMUA NOTIFIKASI =================
+  Future<void> _clearAllNotifications() async {
+    // Tampilkan dialog konfirmasi
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus Semua Notifikasi?', 
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        content: const Text('Tindakan ini tidak dapat dibatalkan.'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Batal', style: TextStyle(color: Colors.grey.shade600)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Hapus', style: TextStyle(color: _dangerColor, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/notifications'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _notifications.clear();
+          _isLoading = false;
+        });
+        _showSnackBar('Semua notifikasi berhasil dibersihkan.');
+      } else {
+        setState(() => _isLoading = false);
+        _showSnackBar('Gagal menghapus notifikasi (Kode: ${response.statusCode})');
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      _showSnackBar('Terjadi kesalahan koneksi.');
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   IconData _getNotifIcon(String? type) {
@@ -215,7 +313,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     }
   }
 
-  /// Format tanggal jadi lebih ramah dibaca, mis. "29 Agu 2026"
   String _formatDate(dynamic rawDate) {
     if (rawDate == null) return '';
     try {
@@ -260,10 +357,18 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: Colors.grey.shade200),
         ),
+        // 🟢 TAMBAHAN: Tombol Hapus Semua di pojok kanan atas
+        actions: [
+          if (_notifications.isNotEmpty && !_isLoading)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_rounded, color: _dangerColor),
+              tooltip: 'Bersihkan Semua',
+              onPressed: _clearAllNotifications,
+            ),
+        ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: _primaryColor))
+          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
           : _errorMessage != null
               ? _buildErrorState()
               : _notifications.isEmpty
@@ -277,7 +382,30 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                         itemBuilder: (context, index) {
                           final notif = _notifications[index];
-                          return _buildNotifCard(notif);
+                          
+                          // 🟢 TAMBAHAN: Dibungkus Dismissible agar bisa di-swipe untuk hapus
+                          return Dismissible(
+                            key: Key('notif_${notif['id']}'),
+                            direction: DismissDirection.endToStart,
+                            onDismissed: (direction) {
+                              _deleteSingleNotification(index);
+                            },
+                            background: Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              decoration: BoxDecoration(
+                                color: _dangerColor,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.symmetric(horizontal: 24),
+                              child: const Icon(
+                                Icons.delete_outline_rounded,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                            ),
+                            child: _buildNotifCard(notif),
+                          );
                         },
                       ),
                     ),
