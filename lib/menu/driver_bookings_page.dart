@@ -38,7 +38,10 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
   }
 
-  // Ambil data user aktif (driver) dari SharedPreferences
+  // Ambil data user aktif (driver) dari SharedPreferences.
+  // Sudah benar tanpa fallback ID palsu (mis. '3') -- default-nya string
+  // kosong, dan _openChatWithRentalOwner() di bawah di-guard secara
+  // eksplisit sebelum membuka ChatPage.
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -94,8 +97,20 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     }
   }
 
-  // Navigasi ke Halaman Chat Driver <-> Perental (Pemilik Rental)
+  // Navigasi ke Halaman Chat Driver <-> Perental (Pemilik Rental).
+  //
+  // Guard _currentUserId ditambahkan di awal: sebelumnya kalau fungsi ini
+  // sempat dipanggil sebelum _loadLocalUserData() selesai (_currentUserId
+  // masih null/kosong), ChatPage tetap dibuka dengan currentUserId kosong.
+  // Akibatnya uniqueChatId jadi berakhiran kosong ("..._driver_") dan,
+  // yang lebih penting, ChatPage memakai currentUserId itu untuk menentukan
+  // bubble chat mana yang "milik saya" -- kalau kosong, bisa salah tampil.
   void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) async {
+    if (_currentUserId == null || _currentUserId!.isEmpty) {
+      _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
+      return;
+    }
+
     final String ownerId = rentalOwner['id']?.toString() ?? '';
     final String ownerName = rentalOwner['name'] ?? 'Perental';
     final String? ownerAvatar = rentalOwner['avatar']?.toString();
@@ -108,9 +123,11 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('access_token') ?? '';
 
-    // Format unik room chat antara perental dan driver (harus sama persis dengan sisi perental)
-    final String uniqueChatId =
-        'room_rental_${ownerId}_driver_${_currentUserId}';
+    // Format unik room chat antara perental dan driver -- HARUS sama persis
+    // dengan sisi Perental (RentalsBookingPage._openChatWithDriver):
+    // room_rental_{perentalId}_driver_{driverId}. Di sini ownerId berperan
+    // sebagai perentalId, _currentUserId sebagai driverId -- sudah cocok.
+    final String uniqueChatId = 'room_rental_${ownerId}_driver_$_currentUserId';
 
     if (!mounted) return;
 
@@ -119,7 +136,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
       MaterialPageRoute(
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
-          currentUserId: _currentUserId ?? '',
+          currentUserId: _currentUserId!,
           currentUserName: _currentUserName ?? AppRole.driver.value,
           receiverId: ownerId,
           receiverName: "Perental: $ownerName",

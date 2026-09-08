@@ -37,47 +37,25 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = true;
   WebSocketChannel? _channel;
 
-  // 🟢 State untuk private channel auth handshake (Pusher/Reverb protocol).
-  // socket_id didapat dari server SETELAH koneksi terbentuk, dan wajib
-  // dikirim ke endpoint /broadcasting/auth Laravel sebelum kita boleh
-  // subscribe ke channel yang bertipe "private-*".
   String? _socketId;
   bool _isSubscribed = false;
-
-  // 🟢 id numeric ASLI dari tabel chats, hasil resolve dari
-  // widget.chatId (yang bisa saja berupa room_identifier string custom,
-  // bukan id numeric). WAJIB dipakai untuk nama channel Reverb, karena
-  // MessageSent::broadcastOn() di server SELALU broadcast ke
-  // "chat.{id_numeric_asli}" (lihat ChatController::sendMessage() ->
-  // $realChatId = $chat->id). Kalau kita subscribe pakai widget.chatId
-  // yang bukan id numeric, nama channel yang kita dengarkan akan beda
-  // dengan yang di-broadcast server -> event tidak akan pernah sampai
-  // walau proses auth-nya sendiri sukses (200 OK).
   String? _realChatId;
 
   static const String _avatarHeroTag = 'chat-receiver-avatar';
-
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _bgColor = Color(0xFFF4F6F9);
   static const Color _myBubbleColor = Color(0xFFDCEBFF);
 
-  // 🟢 Konfigurasi Reverb.
-  // Sesuaikan lagi kalau IP LAN laptop kamu berubah (cek dengan `ipconfig`
-  // di Windows -> lihat "IPv4 Address" di adapter WiFi yang aktif).
-  // Kalau test di ANDROID EMULATOR, ganti host jadi '10.0.2.2'.
-  // Kalau test di HP FISIK yang konek ke WiFi yang sama dengan laptop,
-  // pakai IP LAN laptop (harus sama dengan REVERB_HOST di .env Laravel).
-  static const String _reverbHost = '192.168.189.4';
+  // ================= KONFIGURASI REVERB =================
+  // Port & app key Reverb TIDAK ikut ApiConfig.baseUrl (beda port dari API
+  // biasa), jadi tetap dikonstantakan di sini. Tapi HOST dan SKEMA (ws/wss)
+  // diturunkan otomatis dari ApiConfig.baseUrl lewat getter _reverbUrl di
+  // bawah -- supaya kalau IP di api_config.dart diganti, atau baseUrl sudah
+  // pindah ke https:// (production), koneksi WebSocket otomatis ikut tanpa
+  // perlu ubah dua tempat terpisah.
   static const String _reverbPort = '9090';
   static const String _reverbAppKey = '27d6a6d4761caf333da8';
 
-  // 🟢 Endpoint auth untuk private channel.
-  // Route /broadcasting/auth didaftarkan lewat withBroadcasting() di
-  // bootstrap/app.php, TERPISAH dari grup routes/api.php. Jadi kalau
-  // ApiConfig.baseUrl sudah mengandung suffix "/api" (mis. untuk endpoint
-  // /messages, /chats/{id}/messages di file ini), suffix itu harus
-  // dilepas dulu di sini supaya tidak salah jadi /api/broadcasting/auth
-  // (yang akan 404 karena route-nya memang tidak ada di path itu).
   String get _broadcastAuthUrl {
     String base = ApiConfig.baseUrl;
     if (base.endsWith('/api/')) {
@@ -86,6 +64,18 @@ class _ChatPageState extends State<ChatPage> {
       base = base.substring(0, base.length - 4);
     }
     return '$base/broadcasting/auth';
+  }
+
+  /// Membentuk URL WebSocket Reverb dari ApiConfig.baseUrl.
+  /// - Host diambil dari host baseUrl (mis. 192.168.189.4), bukan hardcode.
+  /// - Skema mengikuti baseUrl: http -> ws (aman untuk LAN/dev),
+  ///   https -> wss (WAJIB untuk production, supaya isi chat terenkripsi).
+  String get _reverbUrl {
+    final apiUri = Uri.parse(ApiConfig.baseUrl);
+    final scheme = apiUri.scheme == 'https' ? 'wss' : 'ws';
+    final host = apiUri.host;
+    return '$scheme://$host:$_reverbPort/app/$_reverbAppKey'
+        '?protocol=7&client=js&version=8.4.0';
   }
 
   @override
@@ -99,11 +89,6 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     _fetchInitialMessages();
-
-    // 🟢 resolve id numeric asli DULU, baru buka koneksi
-    // WebSocket + subscribe. Ini memastikan nama channel yang kita
-    // dengarkan ("private-chat.{id_numeric}") konsisten dengan channel
-    // yang di-broadcast server.
     _resolveRealChatId().then((_) => _initReverbWebSocket());
   }
 
@@ -113,6 +98,34 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Menyeragamkan bentuk data pesan dari 3 sumber berbeda (fetch riwayat,
+  /// event WebSocket 'message.sent', dan response setelah kirim pesan)
+  /// menjadi satu format konsisten yang dipakai UI.
+  ///
+  /// PENTING: nama pengirim SENGAJA tidak diambil dari field 'sender_name'
+  /// backend, karena backend (ChatController::getMessages/sendMessage,
+  /// serta payload event MessageSent yang di-broadcast tanpa relasi sender
+  /// ter-load) tidak pernah mengirim field flat 'sender_name' itu -- yang
+  /// ada hanyalah relasi nested 'sender.name' (kadang bahkan tidak ada sama
+  /// sekali di payload socket). Karena room chat ini selalu 1-lawan-1 (lihat
+  /// constructor ChatPage: currentUserId vs receiverId), nama pengirim bisa
+  /// disimpulkan dengan aman hanya dari sender_id, tanpa bergantung ke
+  /// bentuk response backend yang bisa berubah.
+  Map<String, dynamic> _normalizeMessage(Map<String, dynamic> raw) {
+    final String senderId = raw['sender_id']?.toString() ?? '';
+    final String senderName = senderId == widget.currentUserId
+        ? widget.currentUserName
+        : widget.receiverName;
+
+    return {
+      'id': raw['id'],
+      'text': raw['text'] ?? '',
+      'sender_id': senderId,
+      'sender_name': senderName,
+      'created_at': raw['created_at'],
+    };
   }
 
   Future<void> _fetchInitialMessages() async {
@@ -125,27 +138,18 @@ class _ChatPageState extends State<ChatPage> {
         },
       );
 
-      debugPrint("FETCH MESSAGES STATUS: ${response.statusCode}");
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List fetchedMessages = data['data'] ?? [];
         setState(() {
           _messages.clear();
           for (var msg in fetchedMessages) {
-            _messages.add({
-              'id': msg['id'],
-              'text': msg['text'],
-              'sender_id': msg['sender_id'].toString(),
-              'sender_name': msg['sender_name'] ?? '',
-              'created_at': msg['created_at'],
-            });
+            _messages.add(_normalizeMessage(Map<String, dynamic>.from(msg)));
           }
           _isLoading = false;
         });
         _scrollToBottom();
       } else {
-        debugPrint("FETCH MESSAGES BODY: ${response.body}");
         setState(() => _isLoading = false);
       }
     } catch (e) {
@@ -154,15 +158,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 🟢 resolve widget.chatId (id numeric ATAU room_identifier
-  /// string custom) menjadi id numeric asli dari tabel chats, lewat
-  /// endpoint GET /chats/{chatId}/resolve.
-  ///
-  /// Kalau room memang belum pernah dibuat sama sekali (belum ada pesan
-  /// pertama dikirim), server akan balas chat_id: null. Dalam kasus itu
-  /// kita fallback pakai widget.chatId apa adanya (subscribe mungkin
-  /// gagal untuk sementara, tapi begitu pesan pertama terkirim dan room
-  /// baru dibuat, _sendMessage() akan re-resolve & re-subscribe otomatis).
   Future<void> _resolveRealChatId() async {
     try {
       final response = await http.get(
@@ -173,99 +168,62 @@ class _ChatPageState extends State<ChatPage> {
         },
       );
 
-      debugPrint('RESOLVE CHAT ID STATUS: ${response.statusCode}');
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final resolved = data['chat_id'];
         _realChatId = resolved?.toString();
-        debugPrint('Real chat_id resolved: $_realChatId (dari widget.chatId: ${widget.chatId})');
-      } else {
-        debugPrint('RESOLVE CHAT ID BODY: ${response.body}');
       }
     } catch (e) {
       debugPrint('Gagal resolve chat_id: $e');
     }
   }
 
-  /// 🟢 Implementasi WebSocket murni menggunakan package web_socket_channel
-  /// ke Reverb, dengan private channel auth handshake:
-  /// 1. Buka koneksi WS mentah.
-  /// 2. Tunggu event "pusher:connection_established" untuk dapat socket_id.
-  /// 3. Panggil _subscribeToPrivateChannel() -> minta signature auth ke
-  ///    Laravel, baru kirim frame pusher:subscribe dengan nama channel
-  ///    yang benar ("private-chat.{id_numeric_asli}") plus field "auth"
-  ///    dari response.
-  ///
-  /// Tanpa langkah 2-3 ini, Reverb akan menolak/mengabaikan subscription
-  /// ke channel private, sehingga event message.sent / message.deleted
-  /// tidak akan pernah diterima klien walau koneksi WS-nya sendiri terbuka.
   void _initReverbWebSocket() {
     try {
-      final wsUrl =
-          'ws://$_reverbHost:$_reverbPort/app/$_reverbAppKey?protocol=7&client=js&version=8.4.0';
-
-      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _channel = WebSocketChannel.connect(Uri.parse(_reverbUrl));
 
       _channel?.stream.listen((message) {
         Map<String, dynamic> decoded;
         try {
           decoded = jsonDecode(message);
         } catch (e) {
-          debugPrint('Gagal parse pesan WS: $e');
           return;
         }
 
         final event = decoded['event'];
 
-        // 1. Koneksi baru terbentuk -> server kasih socket_id.
-        //    Baru dari sini kita boleh mulai proses auth handshake.
         if (event == 'pusher:connection_established') {
           final connData = jsonDecode(decoded['data']);
           _socketId = connData['socket_id'];
-          debugPrint('Reverb connected. socket_id: $_socketId');
           _subscribeToPrivateChannel();
           return;
         }
 
         if (event == 'pusher:subscription_succeeded') {
           _isSubscribed = true;
-          debugPrint('✅ Subscribed ke channel: ${decoded['channel']}');
           return;
         }
 
-        if (event == 'pusher:error' || event == 'pusher:subscription_error') {
-          debugPrint('❌ Reverb error: $decoded');
-          return;
-        }
-
-        // 2. Event pesan baru dari room chat ini.
         if (event == 'message.sent') {
           final payload = jsonDecode(decoded['data']);
-          final msgData = payload['message'];
+          final normalized = _normalizeMessage(
+            Map<String, dynamic>.from(payload['message']),
+          );
+          final incomingId = normalized['id'];
 
-          if (msgData['sender_id'].toString() != widget.currentUserId) {
-            setState(() {
-              _messages.add({
-                'id': msgData['id'],
-                'text': msgData['text'],
-                'sender_id': msgData['sender_id'].toString(),
-                'sender_name': msgData['sender_name'] ?? '',
-                'created_at': msgData['created_at'],
-              });
-            });
-            _scrollToBottom();
-          }
+          setState(() {
+            final alreadyExists =
+                _messages.any((m) => m['id'] == incomingId);
+            if (alreadyExists) return;
+            _messages.add(normalized);
+          });
+          _scrollToBottom();
           return;
         }
 
-        // 3. 🟢 BARU: pesan dihapus oleh lawan chat (hard delete di server).
-        // Cocokkan berdasarkan 'id' lalu hilangkan dari layar kita juga
-        // supaya tampilan tetap sinkron dengan database.
         if (event == 'message.deleted') {
           final payload = jsonDecode(decoded['data']);
           final deletedId = payload['message_id'];
-          debugPrint('🗑️ Pesan dihapus dari server: $deletedId');
           setState(() {
             _messages.removeWhere((m) => m['id'] == deletedId);
           });
@@ -274,7 +232,6 @@ class _ChatPageState extends State<ChatPage> {
       }, onError: (error) {
         debugPrint("WebSocket Error: $error");
       }, onDone: () {
-        debugPrint("WebSocket ditutup oleh server/koneksi terputus.");
         _isSubscribed = false;
       });
     } catch (e) {
@@ -282,27 +239,11 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 🟢 Auth handshake untuk private channel.
-  /// Channel "chat.{id}" didaftarkan di routes/channels.php sebagai
-  /// PrivateChannel, artinya nama channel sebenarnya di level protokol
-  /// adalah "private-chat.{id}" dan WAJIB disertai signature "auth" yang
-  /// didapat dari POST ke endpoint /broadcasting/auth Laravel.
-  ///
-  /// 🟢 nama channel pakai (_realChatId ?? widget.chatId)
-  /// -> mengutamakan id numeric asli hasil resolve, supaya selalu match
-  /// dengan channel yang di-broadcast MessageSent::broadcastOn() di server.
-  /// Fallback ke widget.chatId cuma dipakai kalau resolve gagal/room belum
-  /// pernah dibuat sama sekali.
   Future<void> _subscribeToPrivateChannel() async {
-    if (_socketId == null) {
-      debugPrint('Tidak bisa subscribe: socket_id belum tersedia.');
-      return;
-    }
+    if (_socketId == null) return;
 
     final targetChatId = _realChatId ?? widget.chatId;
     final channelName = 'private-chat.$targetChatId';
-
-    debugPrint('Subscribe ke channel: $channelName');
 
     try {
       final authResponse = await http.post(
@@ -317,20 +258,12 @@ class _ChatPageState extends State<ChatPage> {
         },
       );
 
-      debugPrint('BROADCAST AUTH STATUS: ${authResponse.statusCode}');
-
-      if (authResponse.statusCode != 200) {
-        debugPrint('BROADCAST AUTH BODY: ${authResponse.body}');
-        return;
-      }
+      if (authResponse.statusCode != 200) return;
 
       final authData = jsonDecode(authResponse.body);
       final authSignature = authData['auth'];
 
-      if (authSignature == null) {
-        debugPrint('Response auth tidak mengandung field "auth": $authData');
-        return;
-      }
+      if (authSignature == null) return;
 
       _channel?.sink.add(jsonEncode({
         "event": "pusher:subscribe",
@@ -362,25 +295,6 @@ class _ChatPageState extends State<ChatPage> {
     String messageText = _messageController.text.trim();
     _messageController.clear();
 
-    // 🟢 id sementara (negatif, dari timestamp) untuk pesan optimistik yang
-    // belum dapat id asli dari server. Dipakai supaya _deleteMessage() bisa
-    // tahu pesan ini "belum siap dihapus" (lihat pengecekan di bawah), dan
-    // supaya key 'id' selalu ada di setiap item _messages tanpa terkecuali.
-    final tempId = DateTime.now().millisecondsSinceEpoch * -1;
-
-    final tempMessage = {
-      'id': tempId,
-      'text': messageText,
-      'sender_id': widget.currentUserId,
-      'sender_name': widget.currentUserName,
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    setState(() {
-      _messages.add(tempMessage);
-    });
-    _scrollToBottom();
-
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/messages'),
@@ -396,44 +310,31 @@ class _ChatPageState extends State<ChatPage> {
         }),
       );
 
-      // 🟢 Debug logging: lihat langsung status & isi respons server
-      // kalau ada masalah lagi ke depannya, ini kunci untuk tahu
-      // penyebab pastinya (401/422/500) tanpa nebak-nebak.
-      debugPrint("SEND MESSAGE STATUS: ${response.statusCode}");
-      debugPrint("SEND MESSAGE BODY: ${response.body}");
-
       if (response.statusCode != 201) {
         throw Exception('Gagal mengirim ke server (${response.statusCode})');
       }
 
       final data = jsonDecode(response.body);
-
-      // 🟢 BARU: begitu server balas sukses, ganti id sementara (negatif)
-      // di _messages dengan id ASLI dari database. Tanpa ini, pesan yang
-      // baru kita kirim sendiri tidak akan pernah bisa dihapus (karena
-      // endpoint DELETE /messages/{id} butuh id numeric asli).
       final sentMessage = data['data'];
       final realMessageId = sentMessage?['id'];
+
       if (realMessageId != null && mounted) {
         setState(() {
-          final idx = _messages.indexWhere((m) => m['id'] == tempId);
-          if (idx != -1) {
-            _messages[idx]['id'] = realMessageId;
+          final alreadyExists =
+              _messages.any((m) => m['id'] == realMessageId);
+          if (!alreadyExists) {
+            _messages.add(
+              _normalizeMessage(Map<String, dynamic>.from(sentMessage)),
+            );
           }
         });
+        _scrollToBottom();
       }
 
-      // 🟢 kalau ini pesan PERTAMA di room (sebelumnya
-      // _realChatId masih null karena room belum ada saat resolve
-      // dipanggil di initState), sekarang room-nya sudah pasti dibuat
-      // oleh firstOrCreate() di server. Re-resolve & re-subscribe supaya
-      // sesi ini juga langsung ikut mendengarkan channel yang benar
-      // tanpa perlu keluar-masuk halaman chat dulu.
       if (_realChatId == null) {
         final newChatId = sentMessage?['chat_id'];
         if (newChatId != null) {
           _realChatId = newChatId.toString();
-          debugPrint('Room baru dibuat, chat_id: $_realChatId. Re-subscribe...');
           _subscribeToPrivateChannel();
         }
       }
@@ -445,7 +346,8 @@ class _ChatPageState extends State<ChatPage> {
             content: const Text('Pesan gagal terkirim. Coba lagi.'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(12),
           ),
         );
@@ -453,19 +355,12 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 🟢 BARU: hapus pesan secara permanen lewat DELETE /messages/{id}.
-  /// Hard delete di server -> begitu sukses, pesan hilang dari database
-  /// dan tidak bisa dikembalikan. UI dihapus dulu secara optimistik,
-  /// lalu di-rollback kalau ternyata request-nya gagal.
   Future<void> _deleteMessage(Map<String, dynamic> data) async {
     final messageId = data['id'];
 
-    // Pesan yang masih pakai id sementara (negatif) berarti belum
-    // dikonfirmasi server -> jangan biarkan dihapus dulu supaya tidak
-    // salah kirim request ke /messages/null atau /messages/-123.
-    if (messageId == null || (messageId is int && messageId < 0)) {
+    if (messageId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tunggu pesan terkirim dulu sebelum menghapus.')),
+        const SnackBar(content: Text('ID pesan tidak valid.')),
       );
       return;
     }
@@ -484,12 +379,7 @@ class _ChatPageState extends State<ChatPage> {
         },
       );
 
-      debugPrint("DELETE MESSAGE STATUS: ${response.statusCode}");
-      debugPrint("DELETE MESSAGE BODY: ${response.body}");
-
       if (response.statusCode != 200) {
-        // rollback kalau gagal (mis. 403 karena bukan pesan sendiri, atau
-        // 404 karena sudah dihapus lebih dulu dari device lain)
         if (mounted) {
           setState(() {
             _messages.insert(removedIndex.clamp(0, _messages.length), data);
@@ -500,7 +390,6 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
     } catch (e) {
-      debugPrint("Gagal hapus pesan: $e");
       if (mounted) {
         setState(() {
           _messages.insert(removedIndex.clamp(0, _messages.length), data);
@@ -509,10 +398,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 🟢 BARU: bottom sheet konfirmasi hapus, muncul saat pesan (milik
-  /// sendiri) ditekan lama. Server memang membatasi hanya sender yang
-  /// boleh hapus (lihat ChatController::deleteMessage), jadi sheet ini
-  /// hanya dipanggil untuk pesan isMe (lihat onLongPress di build()).
   void _showDeleteOptions(Map<String, dynamic> data) {
     showModalBottomSheet(
       context: context,
@@ -525,8 +410,10 @@ class _ChatPageState extends State<ChatPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.delete_forever_rounded, color: Colors.red),
-                title: const Text('Hapus pesan', style: TextStyle(color: Colors.red)),
+                leading:
+                    const Icon(Icons.delete_forever_rounded, color: Colors.red),
+                title: const Text('Hapus pesan',
+                    style: TextStyle(color: Colors.red)),
                 onTap: () {
                   Navigator.pop(context);
                   _deleteMessage(data);
@@ -606,8 +493,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    final bool hasAvatar =
-        widget.receiverAvatarUrl != null && widget.receiverAvatarUrl!.isNotEmpty;
+    final bool hasAvatar = widget.receiverAvatarUrl != null &&
+        widget.receiverAvatarUrl!.isNotEmpty;
 
     return Scaffold(
       backgroundColor: _bgColor,
@@ -625,9 +512,8 @@ class _ChatPageState extends State<ChatPage> {
                 child: CircleAvatar(
                   radius: 18,
                   backgroundColor: Colors.white.withOpacity(0.2),
-                  backgroundImage: hasAvatar
-                      ? NetworkImage(widget.receiverAvatarUrl!)
-                      : null,
+                  backgroundImage:
+                      hasAvatar ? NetworkImage(widget.receiverAvatarUrl!) : null,
                   child: !hasAvatar
                       ? Text(
                           _initials(widget.receiverName),
@@ -647,7 +533,8 @@ class _ChatPageState extends State<ChatPage> {
                 widget.receiverName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -657,7 +544,8 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: _primaryColor))
+                ? const Center(
+                    child: CircularProgressIndicator(color: _primaryColor))
                 : _messages.isEmpty
                     ? Center(
                         child: Padding(
@@ -687,7 +575,8 @@ class _ChatPageState extends State<ChatPage> {
                               Text(
                                 "Silakan mulai percakapan dengan ${widget.receiverName}.",
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                                style: TextStyle(
+                                    color: Colors.grey.shade500, fontSize: 12),
                               ),
                             ],
                           ),
@@ -695,12 +584,14 @@ class _ChatPageState extends State<ChatPage> {
                       )
                     : ListView.builder(
                         controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final data = _messages[index];
                           final String text = data['text'] ?? '';
-                          final String senderId = data['sender_id']?.toString() ?? '';
+                          final String senderId =
+                              data['sender_id']?.toString() ?? '';
 
                           bool isMe = senderId == widget.currentUserId;
 
@@ -708,7 +599,12 @@ class _ChatPageState extends State<ChatPage> {
                           DateTime? dateTime;
                           var rawTime = data['created_at'];
                           if (rawTime != null) {
-                            dateTime = DateTime.tryParse(rawTime.toString());
+                            // .toLocal() WAJIB: Laravel menyimpan & mengirim
+                            // timestamp dalam UTC. Tanpa ini, jam yang tampil
+                            // di bubble & separator tanggal akan meleset
+                            // sejumlah offset timezone server vs device user.
+                            dateTime =
+                                DateTime.tryParse(rawTime.toString())?.toLocal();
                             if (dateTime != null) {
                               timeString =
                                   "${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}";
@@ -723,7 +619,9 @@ class _ChatPageState extends State<ChatPage> {
                               final prevData = _messages[index - 1];
                               final prevRaw = prevData['created_at'];
                               if (prevRaw != null) {
-                                final prevDate = DateTime.tryParse(prevRaw.toString());
+                                final prevDate =
+                                    DateTime.tryParse(prevRaw.toString())
+                                        ?.toLocal();
                                 if (prevDate != null) {
                                   showDateSeparator = prevDate.year != dateTime.year ||
                                       prevDate.month != dateTime.month ||
@@ -737,9 +635,11 @@ class _ChatPageState extends State<ChatPage> {
                             children: [
                               if (showDateSeparator && dateTime != null)
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 10),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 5),
                                     decoration: BoxDecoration(
                                       color: Colors.white,
                                       borderRadius: BorderRadius.circular(20),
@@ -762,26 +662,29 @@ class _ChatPageState extends State<ChatPage> {
                                   ),
                                 ),
                               Align(
-                                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                                // 🟢 BARU: bungkus bubble dengan GestureDetector agar
-                                // bisa ditekan lama (long press) untuk memunculkan opsi
-                                // hapus. Hanya aktif untuk pesan milik sendiri (isMe),
-                                // sesuai batasan di server (ChatController::deleteMessage).
+                                alignment: isMe
+                                    ? Alignment.centerRight
+                                    : Alignment.centerLeft,
                                 child: GestureDetector(
-                                  onLongPress: isMe ? () => _showDeleteOptions(data) : null,
+                                  onLongPress:
+                                      isMe ? () => _showDeleteOptions(data) : null,
                                   child: Container(
                                     constraints: BoxConstraints(
-                                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                                      maxWidth:
+                                          MediaQuery.of(context).size.width * 0.75,
                                     ),
                                     margin: const EdgeInsets.symmetric(vertical: 3),
-                                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 13, vertical: 9),
                                     decoration: BoxDecoration(
                                       color: isMe ? _myBubbleColor : Colors.white,
                                       borderRadius: BorderRadius.only(
                                         topLeft: const Radius.circular(14),
                                         topRight: const Radius.circular(14),
-                                        bottomLeft: Radius.circular(isMe ? 14 : 4),
-                                        bottomRight: Radius.circular(isMe ? 4 : 14),
+                                        bottomLeft:
+                                            Radius.circular(isMe ? 14 : 4),
+                                        bottomRight:
+                                            Radius.circular(isMe ? 4 : 14),
                                       ),
                                       boxShadow: [
                                         BoxShadow(
@@ -846,7 +749,8 @@ class _ChatPageState extends State<ChatPage> {
                 children: [
                   Expanded(
                     child: Container(
-                      constraints: const BoxConstraints(minHeight: 44, maxHeight: 120),
+                      constraints:
+                          const BoxConstraints(minHeight: 44, maxHeight: 120),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
                         color: _bgColor,
@@ -877,7 +781,8 @@ class _ChatPageState extends State<ChatPage> {
                       onTap: _hasText ? _sendMessage : null,
                       child: const Padding(
                         padding: EdgeInsets.all(11),
-                        child: Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                        child: Icon(Icons.send_rounded,
+                            color: Colors.white, size: 20),
                       ),
                     ),
                   ),
@@ -958,7 +863,8 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
         backgroundColor: Colors.black,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text(widget.title,
+            style: const TextStyle(color: Colors.white, fontSize: 16)),
       ),
       body: GestureDetector(
         onDoubleTapDown: (details) => _doubleTapDetails = details,

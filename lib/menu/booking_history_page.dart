@@ -55,10 +55,16 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     return 'Rp $buffer';
   }
 
+  // 🔴 FIX: SENGAJA tidak diberi fallback hardcode (mis. '3') untuk
+  // user_id, menyamakan pola dengan RentalsBookingPage/DriverBookingsPage.
+  // Kalau belum sempat ke-load dari SharedPreferences, _currentUserId
+  // tetap null/kosong dan setiap aksi yang butuh identitas user (buka
+  // chat) di-guard secara eksplisit di _openChatWithOwner -- bukan diam-
+  // diam memakai ID '3' yang bisa jadi identitas user lain.
   Future<void> _loadUserRoleAndBookings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _currentUserId = prefs.getString('user_id') ?? '3';
+      _currentUserId = prefs.getString('user_id');
       _currentUserName = prefs.getString('user_name') ?? AppRole.penyewa.value;
     });
     _fetchBookings();
@@ -132,14 +138,19 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
       if (response.statusCode == 200) {
         if (mounted) {
-          _showSnackBar('Booking berhasil dibatalkan.', const Color(0xFF16A34A));
+          _showSnackBar(
+            'Booking berhasil dibatalkan.',
+            const Color(0xFF16A34A),
+          );
         }
         _fetchBookings();
       } else {
         final decoded = jsonDecode(response.body);
         if (mounted) {
           _showSnackBar(
-              decoded['message'] ?? 'Gagal membatalkan pesanan', Colors.red);
+            decoded['message'] ?? 'Gagal membatalkan pesanan',
+            Colors.red,
+          );
         }
       }
     } catch (e) {
@@ -183,8 +194,9 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       } else {
         if (mounted) {
           _showSnackBar(
-              decoded['message'] ?? 'Gagal mengecek status pembayaran',
-              Colors.red);
+            decoded['message'] ?? 'Gagal mengecek status pembayaran',
+            Colors.red,
+          );
         }
       }
       _fetchBookings();
@@ -196,9 +208,27 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
- void _openChatWithOwner(dynamic carData) async {
+  // Navigasi ke Halaman Chat Penyewa <-> Perental (Pemilik Mobil).
+  //
+  // 🔴 FIX: menyamakan pola guard dengan _openChatWithRenter
+  // (RentalsBookingPage) dan _openChatWithRentalOwner (DriverBookingsPage).
+  // SEBELUMNYA ada fallback `carData['user_id']?.toString() ?? '2'` dan
+  // `_currentUserId ?? '3'`. Fallback ini berbahaya: kalau relasi pemilik
+  // mobil (car.user / car.owner) belum ter-load dari backend, atau
+  // _currentUserId belum sempat ke-load dari SharedPreferences, chat tetap
+  // dibuka tapi diam-diam memakai ID yang SALAH (owner fiktif ID 2, atau
+  // seolah penyewa login sebagai user ID 3) tanpa pemberitahuan apapun ke
+  // penyewa. Sekarang _currentUserId di-guard eksplisit di awal fungsi
+  // (return + snackbar), dan ownerId tidak lagi punya fallback angka --
+  // kalau tidak ditemukan, dianggap tidak valid dan navigasi dibatalkan.
+  void _openChatWithOwner(dynamic carData) async {
     if (carData == null) {
       _showSnackBar('Informasi kendaraan tidak tersedia.', Colors.red);
+      return;
+    }
+
+    if (_currentUserId == null || _currentUserId!.isEmpty) {
+      _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
       return;
     }
 
@@ -206,25 +236,28 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
     final String ownerId = ownerMap != null && ownerMap['id'] != null
         ? ownerMap['id'].toString()
-        : (carData['user_id']?.toString() ?? '2');
-
-    final String ownerName = ownerMap != null && ownerMap['name'] != null
-        ? ownerMap['name'].toString()
-        : 'Perental';
-
-    final String? ownerAvatar =
-        ownerMap != null ? ownerMap['avatar']?.toString() : null;
+        : (carData['user_id']?.toString() ?? '');
 
     if (ownerId.isEmpty || ownerId == 'null') {
       _showSnackBar('ID Perental tidak valid.', Colors.red);
       return;
     }
 
+    final String ownerName = ownerMap != null && ownerMap['name'] != null
+        ? ownerMap['name'].toString()
+        : 'Perental';
+
+    final String? ownerAvatar = ownerMap != null
+        ? ownerMap['avatar']?.toString()
+        : null;
+
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('access_token') ?? '';
 
-    final String uniqueChatId =
-        'room_rental_${ownerId}_user_${_currentUserId ?? '3'}';
+    // PENTING: skema "room_rental_{ownerId}_user_{currentUserId}" ini harus
+    // PERSIS SAMA dengan yang dipakai sisi Perental
+    // (RentalsBookingPage._openChatWithRenter) untuk room yang sama.
+    final String uniqueChatId = 'room_rental_${ownerId}_user_$_currentUserId';
 
     if (!mounted) return;
 
@@ -233,8 +266,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       MaterialPageRoute(
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
-          currentUserId: _currentUserId ?? '3',
-          currentUserName: _currentUserName ?? 'Penyewa',
+          currentUserId: _currentUserId!,
+          currentUserName: _currentUserName ?? AppRole.penyewa.value,
           receiverId: ownerId,
           receiverName: "Perental: $ownerName",
           receiverAvatarUrl: ownerAvatar,
@@ -266,7 +299,9 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           title: Row(
             children: [
               Container(
@@ -275,12 +310,17 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                   color: _primaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: const Icon(Icons.qr_code_rounded,
-                    size: 18, color: _primaryColor),
+                child: const Icon(
+                  Icons.qr_code_rounded,
+                  size: 18,
+                  color: _primaryColor,
+                ),
               ),
               const SizedBox(width: 10),
-              const Text('Pembayaran QRIS',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Text(
+                'Pembayaran QRIS',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
             ],
           ),
           content: Column(
@@ -313,8 +353,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                           height: 180,
                           width: 180,
                           child: Center(
-                              child: CircularProgressIndicator(
-                                  color: _primaryColor)),
+                            child: CircularProgressIndicator(
+                              color: _primaryColor,
+                            ),
+                          ),
                         );
                       },
                       errorBuilder: (context, error, stackTrace) => Container(
@@ -322,8 +364,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         width: 180,
                         color: _bgColor,
                         child: const Center(
-                          child: Text('Gagal memuat QR',
-                              style: TextStyle(fontSize: 12)),
+                          child: Text(
+                            'Gagal memuat QR',
+                            style: TextStyle(fontSize: 12),
+                          ),
                         ),
                       ),
                     ),
@@ -369,8 +413,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Tutup',
-                  style: TextStyle(color: Colors.grey.shade700)),
+              child: Text(
+                'Tutup',
+                style: TextStyle(color: Colors.grey.shade700),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -378,7 +424,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               onPressed: () {
                 Navigator.pop(context);
@@ -443,28 +490,24 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         ),
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: _primaryColor))
+          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
           : _errorMessage != null
-              ? _buildErrorState()
-              : _bookings.isEmpty
-                  ? _buildEmptyState()
-                  : RefreshIndicator(
-                      color: _primaryColor,
-                      onRefresh: _fetchBookings,
-                      child: ListView.builder(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: _bookings.length,
-                        padding: const EdgeInsets.all(16),
-                        itemBuilder: (context, index) {
-                          return _buildBookingCard(_bookings[index]);
-                        },
-                      ),
-                    ),
-      bottomNavigationBar: Bottom(
-        currentIndex: 2,
-        onTap: (index) {},
-      ),
+          ? _buildErrorState()
+          : _bookings.isEmpty
+          ? _buildEmptyState()
+          : RefreshIndicator(
+              color: _primaryColor,
+              onRefresh: _fetchBookings,
+              child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                itemCount: _bookings.length,
+                padding: const EdgeInsets.all(16),
+                itemBuilder: (context, index) {
+                  return _buildBookingCard(_bookings[index]);
+                },
+              ),
+            ),
+      bottomNavigationBar: Bottom(currentIndex: 2, onTap: (index) {}),
     );
   }
 
@@ -482,8 +525,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 color: Colors.red.withOpacity(0.08),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.error_outline_rounded,
-                  size: 40, color: Colors.red),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 40,
+                color: Colors.red,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -500,9 +546,12 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 backgroundColor: _primaryColor,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
               ),
             ),
           ],
@@ -517,7 +566,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey.shade400),
+          Icon(
+            Icons.receipt_long_outlined,
+            size: 48,
+            color: Colors.grey.shade400,
+          ),
           const SizedBox(height: 12),
           Text(
             'Belum ada riwayat pemesanan.',
@@ -528,8 +581,13 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     );
   }
 
-  Widget _infoRow(IconData icon, String label, String value,
-      {Color? valueColor, FontWeight? valueWeight}) {
+  Widget _infoRow(
+    IconData icon,
+    String label,
+    String value, {
+    Color? valueColor,
+    FontWeight? valueWeight,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -606,8 +664,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               ),
               const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -626,10 +686,16 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           const SizedBox(height: 14),
 
           // ===== Detail sewa =====
-          _infoRow(Icons.date_range_outlined, 'Periode Sewa',
-              '$startDateFormatted s/d $endDateFormatted'),
-          _infoRow(Icons.timelapse_outlined, 'Durasi',
-              '${booking['total_days']} Hari'),
+          _infoRow(
+            Icons.date_range_outlined,
+            'Periode Sewa',
+            '$startDateFormatted s/d $endDateFormatted',
+          ),
+          _infoRow(
+            Icons.timelapse_outlined,
+            'Durasi',
+            '${booking['total_days']} Hari',
+          ),
           _infoRow(
             Icons.key_outlined,
             'Layanan',
@@ -637,9 +703,12 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             valueColor: withDriver ? const Color(0xFF4F46E5) : null,
           ),
           if (withDriver && driver != null)
-            _infoRow(Icons.badge_outlined, 'Driver Bertugas',
-                '${driver['name']}',
-                valueColor: const Color(0xFF16A34A)),
+            _infoRow(
+              Icons.badge_outlined,
+              'Driver Bertugas',
+              '${driver['name']}',
+              valueColor: const Color(0xFF16A34A),
+            ),
 
           Container(
             margin: const EdgeInsets.symmetric(vertical: 10),
@@ -648,13 +717,20 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           ),
 
           // ===== Pembayaran =====
-          _infoRow(Icons.payments_outlined, 'Metode Pembayaran',
-              paymentMethod == 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)'),
+          _infoRow(
+            Icons.payments_outlined,
+            'Metode Pembayaran',
+            paymentMethod == 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)',
+          ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Row(
               children: [
-                Icon(Icons.verified_outlined, size: 14, color: Colors.grey.shade400),
+                Icon(
+                  Icons.verified_outlined,
+                  size: 14,
+                  color: Colors.grey.shade400,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   'Status Pembayaran',
@@ -662,8 +738,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: isPaid
                         ? const Color(0xFF16A34A).withOpacity(0.1)
@@ -756,12 +834,16 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           side: BorderSide(color: color.withOpacity(0.4)),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           minimumSize: Size.zero,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
         onPressed: onPressed,
         icon: Icon(icon, size: 15),
-        label: Text(label,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
       );
     }
     return ElevatedButton.icon(
@@ -775,8 +857,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       ),
       onPressed: onPressed,
       icon: Icon(icon, size: 15),
-      label: Text(label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
     );
   }
 }

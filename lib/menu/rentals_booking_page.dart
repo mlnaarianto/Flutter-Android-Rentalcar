@@ -67,11 +67,15 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     return 'Rp $buffer';
   }
 
-  // Ambil data user aktif (Perental) dari SharedPreferences
+  // Ambil data user aktif (Perental) dari SharedPreferences.
+  // SENGAJA tidak diberi fallback hardcode (mis. '3') untuk user_id -- kalau
+  // belum sempat ke-load, _currentUserId tetap null dan setiap aksi yang
+  // butuh identitas user (buka chat) akan di-guard secara eksplisit, bukan
+  // diam-diam memakai identitas user lain.
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _currentUserId = prefs.getString('user_id') ?? '3';
+      _currentUserId = prefs.getString('user_id');
       _currentUserName = prefs.getString('user_name') ?? AppRole.perental.value;
     });
   }
@@ -358,8 +362,16 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     }
   }
 
-  // Navigasi ke Halaman Chat Perental <-> Penyewa
+  // Navigasi ke Halaman Chat Perental <-> Penyewa.
+  // Di-guard: kalau _currentUserId belum ke-load, JANGAN buka ChatPage --
+  // sebelumnya kode ini fallback diam-diam ke '3' dan bisa menghasilkan
+  // uniqueChatId berisi literal "null" kalau _currentUserId null.
   void _openChatWithRenter(Map<String, dynamic> renter) async {
+    if (_currentUserId == null || _currentUserId!.isEmpty) {
+      _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
+      return;
+    }
+
     final String renterId = renter['id']?.toString() ?? '';
     final String renterName = renter['name'] ?? 'Penyewa';
     final String? renterAvatar = renter['avatar']?.toString();
@@ -372,6 +384,12 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('access_token') ?? '';
 
+    // PENTING: skema "room_rental_{perentalId}_user_{renterId}" ini harus
+    // PERSIS SAMA dengan yang dipakai halaman chat milik Penyewa untuk room
+    // yang sama (backend mencocokkan chatId ke room_identifier apa adanya,
+    // lihat ChatController::sendMessage). Kalau sisi Penyewa membangun
+    // chatId dengan urutan/format berbeda, keduanya akan dianggap dua room
+    // terpisah oleh backend.
     final String uniqueChatId = 'room_rental_${_currentUserId}_user_$renterId';
 
     if (!mounted) return;
@@ -381,7 +399,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       MaterialPageRoute(
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
-          currentUserId: _currentUserId ?? '3',
+          currentUserId: _currentUserId!,
           currentUserName: _currentUserName ?? AppRole.perental.value,
           receiverId: renterId,
           receiverName: "Penyewa: $renterName",
@@ -392,8 +410,14 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     );
   }
 
-  // Navigasi ke Halaman Chat Perental <-> Driver
+  // Navigasi ke Halaman Chat Perental <-> Driver.
+  // Guard yang sama seperti _openChatWithRenter di atas.
   void _openChatWithDriver(Map<String, dynamic> driver) async {
+    if (_currentUserId == null || _currentUserId!.isEmpty) {
+      _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
+      return;
+    }
+
     final String driverId = driver['id']?.toString() ?? '';
     final String driverName = driver['name'] ?? 'Driver';
     final String? driverAvatar = driver['avatar']?.toString();
@@ -406,6 +430,9 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('access_token') ?? '';
 
+    // Catatan skema chatId sama seperti di _openChatWithRenter -- pastikan
+    // sisi Driver (kalau punya halaman chat sendiri ke Perental) memakai
+    // format yang identik untuk room yang sama.
     final String uniqueChatId = 'room_rental_${_currentUserId}_driver_$driverId';
 
     if (!mounted) return;
@@ -415,7 +442,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       MaterialPageRoute(
         builder: (context) => ChatPage(
           chatId: uniqueChatId,
-          currentUserId: _currentUserId ?? '3',
+          currentUserId: _currentUserId!,
           currentUserName: _currentUserName ?? AppRole.perental.value,
           receiverId: driverId,
           receiverName: "Driver: $driverName",

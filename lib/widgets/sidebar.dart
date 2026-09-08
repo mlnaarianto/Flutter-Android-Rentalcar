@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/rentals_booking_page.dart';
 import 'package:rentalcar/menu/chat.dart';
@@ -25,6 +27,19 @@ class _SidebarState extends State<Sidebar> {
   String? _avatarUrl;
   String? _userId;
 
+  // 🟢 FIX: sebelumnya receiver_id CS di _openAdminChat() hardcode ke '1'.
+  // Sekarang diambil dari GET /api/support-agent (query berdasarkan
+  // Permission::ReceiveSupportChat di backend, bukan ID tetap). Null
+  // selama belum selesai fetch / fetch gagal -> _openAdminChat() akan
+  // fallback ke '1' supaya menu tetap bisa dipakai walau endpoint ini
+  // belum siap atau permission belum di-assign ke siapa pun.
+  //
+  // TODO: sesuaikan _apiBaseUrl ini dengan base URL API kamu yang
+  // sebenarnya (mis. ambil dari file config/env terpisah), ini cuma
+  // placeholder supaya kode tetap bisa langsung dipakai.
+  static const String _apiBaseUrl = 'https://api.rentalcar.test/api';
+  String? _supportAgentId;
+
   // Tag unik untuk animasi Hero avatar sidebar -> fullscreen viewer
   static const String _avatarHeroTag = 'sidebar-user-avatar';
 
@@ -43,8 +58,54 @@ class _SidebarState extends State<Sidebar> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _avatarUrl = prefs.getString('avatar_url');
-      _userId = prefs.getString('user_id') ?? '3';
+      // SENGAJA tidak diberi fallback hardcode (mis. '3') di sini. Kalau
+      // user_id belum tersimpan di SharedPreferences (mis. race condition
+      // sesaat setelah login), _userId akan tetap null dan setiap aksi yang
+      // butuh identitas user (mis. buka Chat Admin) akan di-guard secara
+      // eksplisit -- bukan diam-diam "menyamar" jadi user ID lain.
+      _userId = prefs.getString('user_id');
     });
+
+    // Dipisah dari setState di atas karena butuh 'await' network call --
+    // tidak masalah dipanggil setelah _userId di-set, keduanya independen.
+    await _loadSupportAgentId(prefs);
+  }
+
+  /// ================= AMBIL ID ADMIN/CS SECARA DINAMIS =================
+  /// Panggil GET /api/support-agent sekali saat Sidebar dibuka. Endpoint
+  /// ini di backend query user berdasarkan Permission::ReceiveSupportChat,
+  /// jadi kalau admin CS dipindah/diganti lewat Filament, aplikasi ini
+  /// otomatis ikut tanpa perlu update kode atau rilis ulang.
+  ///
+  /// Kalau gagal (network error, 404 karena permission belum di-assign ke
+  /// siapa pun, dsb), _supportAgentId dibiarkan null dan _openAdminChat()
+  /// akan pakai fallback '1' -- supaya menu Chat Admin tidak ikut rusak
+  /// hanya karena endpoint ini belum siap.
+  Future<void> _loadSupportAgentId(SharedPreferences prefs) async {
+    final token = prefs.getString('access_token') ?? '';
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_apiBaseUrl/support-agent'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+
+      if (response.statusCode != 200) return;
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final id = body['data']?['id'];
+
+      if (id != null && mounted) {
+        setState(() {
+          _supportAgentId = id.toString();
+        });
+      }
+    } catch (_) {
+      // Diamkan -- fallback ID lama tetap dipakai lewat _openAdminChat().
+    }
   }
 
   /// ================= FIX FOTO GOOGLE BURAM/PIXELATED =================
@@ -96,12 +157,46 @@ class _SidebarState extends State<Sidebar> {
     );
   }
 
-  /// Warna badge role, dibedakan per peran biar gampang dikenali sekilas.
-  Color _roleColor(String role) {
-    if (role == AppRole.superAdmin.value) return const Color(0xFFDC2626);
-    if (role == AppRole.perental.value) return _primaryColor;
-    if (role == AppRole.driver.value) return const Color(0xFF7C3AED);
-    return _accentColor;
+  /// ================= BUKA HALAMAN CHAT ADMIN =================
+  /// Dipisah dari onTap langsung supaya bisa di-guard: kalau _userId belum
+  /// sempat ke-load dari SharedPreferences, jangan kirim user ke ChatPage
+  /// dengan identitas kosong/salah -- beri tahu user untuk coba lagi.
+  Future<void> _openAdminChat(BuildContext context) async {
+    if (_userId == null || _userId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Data pengguna belum siap, coba lagi sesaat lagi.'),
+        ),
+      );
+      return;
+    }
+
+    Navigator.pop(context);
+
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token') ?? '';
+
+    if (!context.mounted) return;
+
+    final String uniqueChatId =
+        'room_user_${widget.userEmail.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatPage(
+          chatId: uniqueChatId,
+          currentUserId: _userId!,
+          currentUserName: widget.userName,
+          // 🟢 FIX: sebelumnya hardcode '1'. Sekarang pakai _supportAgentId
+          // hasil fetch dari /api/support-agent, dengan fallback ke '1'
+          // kalau fetch belum selesai / gagal -- lihat _loadSupportAgentId().
+          receiverId: _supportAgentId ?? '1',
+          receiverName: "Admin Rental (CS)",
+          authToken: token,
+        ),
+      ),
+    );
   }
 
   /// ================= HELPER UI: JUDUL SECTION =================
@@ -189,9 +284,6 @@ class _SidebarState extends State<Sidebar> {
   Widget build(BuildContext context) {
     final List<String> rolesList =
         widget.userRoles.map((role) => role.toString()).toList();
-
-    final String uniqueChatId =
-        'room_user_${widget.userEmail.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
 
     final bool hasAvatar = _avatarUrl != null && _avatarUrl!.isNotEmpty;
 
@@ -354,28 +446,7 @@ class _SidebarState extends State<Sidebar> {
                     iconColor: _primaryColor,
                     title: 'Chat Admin',
                     subtitle: 'Hubungi customer service',
-                    onTap: () async {
-                      Navigator.pop(context);
-                      
-                      final prefs = await SharedPreferences.getInstance();
-                      final token = prefs.getString('access_token') ?? '';
-
-                      if (!context.mounted) return;
-
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ChatPage(
-                            chatId: uniqueChatId,
-                            currentUserId: _userId ?? '3',
-                            currentUserName: widget.userName,
-                            receiverId: '1', // ID Admin / CS (biasanya ID 1)
-                            receiverName: "Admin Rental (CS)",
-                            authToken: token,
-                          ),
-                        ),
-                      );
-                    },
+                    onTap: () => _openAdminChat(context),
                   ),
 
                   // MENU KHUSUS DRIVER
@@ -419,19 +490,9 @@ class _SidebarState extends State<Sidebar> {
                     ),
                   ],
 
-                  // MENU ADMINISTRATOR (Super Admin)
-                  if (rolesList.contains(AppRole.superAdmin.value)) ...[
-                    _sectionLabel('ADMINISTRATOR'),
-                    _menuItem(
-                      icon: Icons.admin_panel_settings_rounded,
-                      iconColor: const Color(0xFFDC2626),
-                      title: 'Manajemen User',
-                      subtitle: 'Kelola pengguna & hak akses',
-                      onTap: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                  ],
+                  // Menu "ADMINISTRATOR" (Manajemen User) sudah dihapus --
+                  // sebelumnya cuma memanggil Navigator.pop(context) tanpa
+                  // tujuan nyata (belum ada halamannya).
                 ],
               ),
             ),

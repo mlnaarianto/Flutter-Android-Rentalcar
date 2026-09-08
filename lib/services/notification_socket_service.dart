@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform; // 👈 tambahan: deteksi platform android/ios
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -47,6 +48,17 @@ import 'package:rentalcar/utils/navigation_service.dart'; // 👈 tambahan: navi
 ///   `main.dart` lewat `onMessageOpenedApp` & `getInitialMessage`.
 /// Dua-duanya pakai `navigatorKey` yang sama supaya konsisten menuju
 /// `NotifikasiPage`.
+///
+/// 🟢 Multi-device FCM (REVISI):
+/// Backend sekarang menyimpan token FCM per-device di tabel
+/// `user_fcm_tokens` (bukan lagi 1 kolom tunggal di `users`), supaya
+/// user yang login di beberapa device (mis. HP + web) sama-sama bisa
+/// menerima push. Konsekuensinya:
+/// - `_syncFcmToken()` sekarang ikut kirim `device_id` & `platform`
+///   supaya tiap device tercatat sebagai baris terpisah di backend.
+/// - Ditambahkan `removeFcmToken()` yang WAJIB dipanggil saat logout,
+///   supaya device yang logout tidak terus menerima push notification
+///   selamanya (lihat pemanggilannya di halaman yang memproses logout).
 class NotificationSocketService {
   NotificationSocketService._internal() {
     _initLocalNotifications();
@@ -261,9 +273,47 @@ class NotificationSocketService {
     }
   }
 
+  static const String _deviceIdPrefsKey = 'fcm_device_id';
+
+  /// 🟢 BARU: ambil device_id yang persisten untuk device ini. Kalau
+  /// belum pernah dibuat, generate sekali dan simpan permanen di
+  /// SharedPreferences -- ini yang membedakan device ini dari device
+  /// lain milik user yang sama di tabel `user_fcm_tokens` backend.
+  ///
+  /// Sengaja pakai random string manual (bukan package `uuid` terpisah)
+  /// supaya tidak perlu tambah dependency baru -- cukup unik untuk
+  /// tujuan pembeda device, tidak perlu benar-benar UUID v4 standar.
+  Future<String> _getOrCreateDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? deviceId = prefs.getString(_deviceIdPrefsKey);
+
+    if (deviceId == null) {
+      final random = DateTime.now().microsecondsSinceEpoch;
+      deviceId = 'device_$random';
+      await prefs.setString(_deviceIdPrefsKey, deviceId);
+    }
+
+    return deviceId;
+  }
+
+  /// 🟢 BARU: nama platform untuk dikirim ke backend (kolom `platform`
+  /// di tabel `user_fcm_tokens`), berguna untuk debug/filter nanti.
+  String get _platformName {
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    return 'unknown';
+  }
+
   /// 🟢 Kirim/update token FCM device ini ke server, supaya backend
   /// bisa kirim push notification lewat Firebase saat WS tidak aktif.
   /// Endpoint disesuaikan dengan routes/api.php: POST /api/fcm-token.
+  ///
+  /// 🟢 DIPERBAIKI: sekarang ikut kirim device_id & platform, karena
+  /// backend sudah pindah dari 1 kolom fcm_token tunggal ke tabel
+  /// user_fcm_tokens (banyak baris per user, 1 per device). Tanpa
+  /// device_id, token tetap tersimpan benar (key uniknya tetap di
+  /// kolom token), tapi device_id membantu membedakan device mana yang
+  /// mendaftarkan token yang mana saat debug.
   Future<void> _syncFcmToken(String token) async {
     try {
       final fcmToken = await FirebaseMessaging.instance.getToken();
@@ -272,13 +322,19 @@ class NotificationSocketService {
         return;
       }
 
+      final deviceId = await _getOrCreateDeviceId();
+
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/fcm-token'),
         headers: {
           'Authorization': 'Bearer $token',
           'Accept': 'application/json',
         },
-        body: {'fcm_token': fcmToken},
+        body: {
+          'fcm_token': fcmToken,
+          'device_id': deviceId,
+          'platform': _platformName,
+        },
       );
 
       if (response.statusCode == 200) {
@@ -289,6 +345,42 @@ class NotificationSocketService {
       }
     } catch (e) {
       debugPrint('Reverb Service: error sync FCM token: $e');
+    }
+  }
+
+  /// 🟢 BARU: hapus token FCM device ini dari server. WAJIB dipanggil
+  /// saat logout, SEBELUM access_token dihapus dari SharedPreferences --
+  /// karena endpoint DELETE /api/fcm-token butuh header Authorization
+  /// yang masih valid.
+  ///
+  /// Tanpa ini, device yang logout akan TETAP menerima push notification
+  /// selamanya (baris token di tabel user_fcm_tokens tidak pernah
+  /// terhapus), walau user sudah keluar dari akunnya di device ini.
+  Future<void> removeFcmToken(String accessToken) async {
+    try {
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken == null) {
+        debugPrint('Reverb Service: tidak ada FCM token untuk dihapus, skip.');
+        return;
+      }
+
+      final response = await http.delete(
+        Uri.parse('${ApiConfig.baseUrl}/fcm-token'),
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Accept': 'application/json',
+        },
+        body: {'fcm_token': fcmToken},
+      );
+
+      if (response.statusCode == 200) {
+        debugPrint('Reverb Service: FCM token berhasil dihapus dari server.');
+      } else {
+        debugPrint(
+            'Reverb Service: gagal hapus FCM token (${response.statusCode}).');
+      }
+    } catch (e) {
+      debugPrint('Reverb Service: error hapus FCM token: $e');
     }
   }
 

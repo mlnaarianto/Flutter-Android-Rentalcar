@@ -11,6 +11,7 @@ import 'package:rentalcar/menu/booking_history_page.dart';
 import 'package:rentalcar/menu/rental_application_page.dart'; // 👈 Import Halaman Pengajuan Perental
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart';
+import 'package:rentalcar/services/notification_socket_service.dart'; // 👈 tambahan: hapus token FCM saat logout
 
 class Bottom extends StatefulWidget {
   final int currentIndex;
@@ -100,6 +101,14 @@ class _BottomState extends State<Bottom> {
         final String? token = prefs.getString('access_token');
 
         if (token != null) {
+          // 🟢 BARU: hapus token FCM device ini dari server DULU,
+          // sebelum access_token dihapus/di-invalidate -- karena
+          // endpoint ini butuh header Authorization yang masih valid.
+          // Tanpa ini, device ini akan TETAP menerima push notification
+          // walau sudah logout, karena baris token di tabel
+          // user_fcm_tokens tidak pernah terhapus.
+          await NotificationSocketService().removeFcmToken(token);
+
           await http.post(
             Uri.parse(ApiConfig.logout),
             headers: {
@@ -108,6 +117,12 @@ class _BottomState extends State<Bottom> {
             },
           );
         }
+
+        // 🟢 BARU: tutup koneksi WebSocket & reset state service,
+        // supaya kalau ada user login lagi (akun sama/beda) di device
+        // ini, service mulai dari kondisi bersih -- bukan meneruskan
+        // sesi user sebelumnya.
+        NotificationSocketService().disconnect();
 
         await prefs.remove('access_token');
         await prefs.remove('avatar_url');

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1487,10 +1488,43 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   bool? _lastFullScreenState;
   bool _isHandlingFullScreenChange = false;
 
+  // 🔽 TAMBAHAN: melacak posisi tonton real-time, sama seperti
+  //    "currentTime" + setInterval di versi React (web)
+  double _currentSeconds = 0;
+  Timer? _timeTrackerTimer;
+
   @override
   void initState() {
     super.initState();
     _initController();
+    _startTimeTracker();
+  }
+
+  // 🔽 TAMBAHAN: polling posisi video tiap 1 detik selagi popup terbuka.
+  //    Analog dengan useEffect + setInterval(..., 1000) di CarDetail.tsx
+  void _startTimeTracker() {
+    _timeTrackerTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (_isDisposed) return;
+      try {
+        final time = await _controller.currentTime;
+        if (!_isDisposed && mounted) {
+          setState(() {
+            _currentSeconds = time;
+          });
+        }
+      } catch (_) {
+        // player belum siap / lagi transisi fullscreen, abaikan saja
+      }
+    });
+  }
+
+  // 🔽 TAMBAHAN: format detik -> "M:SS", sama persis dengan logic di React:
+  //    `${Math.floor(seconds / 60)}:${(Math.floor(seconds % 60)).padStart(2,'0')}`
+  String _formatTimestamp(double seconds) {
+    final secondsInt = seconds.floor();
+    final minutes = secondsInt ~/ 60;
+    final secs = (secondsInt % 60).toString().padLeft(2, '0');
+    return '$minutes:$secs';
   }
 
   void _initController() {
@@ -1607,6 +1641,7 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   @override
   void dispose() {
     _isDisposed = true;
+    _timeTrackerTimer?.cancel(); // 🔽 TAMBAHAN: hentikan polling supaya tidak leak
 
     // Kembalikan orientasi layar ke portrait terlebih dahulu
     SystemChrome.setPreferredOrientations([
@@ -1644,9 +1679,14 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
         TextButton.icon(
           onPressed: _openInYouTubeApp,
           icon: const Icon(Icons.open_in_new_rounded, size: 16, color: Colors.redAccent),
-          label: const Text(
-            'Tonton langsung di Aplikasi YouTube (Lanjutkan Menit Ini)',
-            style: TextStyle(color: Colors.white70, fontSize: 13),
+          // 🔽 UBAH: label sekarang dinamis, menampilkan menit:detik terakhir
+          //    ditonton — sama seperti tombol "Tonton di YouTube (Lanjutkan di M:SS)"
+          //    di versi React.
+          label: Text(
+            _currentSeconds > 1
+                ? 'Tonton di Aplikasi YouTube (Lanjutkan di ${_formatTimestamp(_currentSeconds)})'
+                : 'Tonton langsung di Aplikasi YouTube',
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
         ),
       ],
