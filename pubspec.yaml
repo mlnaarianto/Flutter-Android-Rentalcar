@@ -53,10 +53,15 @@ dependencies:
   latlong2: ^0.9.1
   geolocator: ^13.0.1
 
+  intl_phone_field: ^3.2.0
+  flutter_quickalert: ^1.0.1
+
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+
+  font_awesome_flutter: ^11.0.0
 
 dev_dependencies:
   flutter_test:

@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/booking_form_page.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class CarDetailPage extends StatefulWidget {
   final int carId;
@@ -168,8 +169,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   String _resolveVideoUrl(String url) {
-    final driveMatch =
-        RegExp(r'drive\.google\.com/file/d/([^/]+)').firstMatch(url);
+    final driveMatch = RegExp(
+      r'drive\.google\.com/file/d/([^/]+)',
+    ).firstMatch(url);
     if (driveMatch != null) {
       final fileId = driveMatch.group(1);
       return 'https://drive.google.com/uc?export=download&id=$fileId';
@@ -320,7 +322,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
                           subtitle,
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
                         ),
                       ),
                   ],
@@ -373,6 +378,169 @@ class _CarDetailPageState extends State<CarDetailPage> {
         ],
       ),
     );
+  }
+
+  /// ================= PHONE / WHATSAPP TILE =================
+  Widget _buildPhoneTile(String phone) {
+    final bool hasPhone = phone.isNotEmpty && phone != '-';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: _primaryColor.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(Icons.phone_outlined, size: 16, color: _primaryColor),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Nomor HP',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  phone.isEmpty ? '-' : phone,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (hasPhone) ...[
+            _phoneActionButton(
+              icon: Icons.call_rounded,
+              color: const Color(0xFF16A34A),
+              tooltip: 'Telepon',
+              onPressed: () => _launchPhoneCall(phone),
+            ),
+            const SizedBox(width: 8),
+            _phoneActionButton(
+              icon: FontAwesomeIcons
+                  .whatsapp, // 👈 diganti dari Icons.chat_rounded
+              color: const Color(0xFF25D366),
+              tooltip: 'WhatsApp',
+              onPressed: () => _launchWhatsApp(phone),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _phoneActionButton({
+    required dynamic icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    final Widget iconWidget = icon is FaIconData
+        ? FaIcon(icon, size: 18, color: color)
+        : Icon(icon as IconData, size: 18, color: color);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color.withOpacity(0.1),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: iconWidget,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _sanitizePhoneDigits(String phone) {
+    return phone.replaceAll(RegExp(r'[^0-9+]'), '');
+  }
+
+  /// Konversi nomor ke format internasional untuk wa.me (tanpa '+', tanpa '0' di depan)
+  /// Mendukung multi-negara: kalau nomor sudah punya '+' atau kode negara, dipakai apa adanya.
+  /// Kalau nomor masih format lokal (diawali '0'), baru pakai [defaultCountryCode] sebagai fallback.
+  String _toWhatsAppFormat(String phone, {String defaultCountryCode = '62'}) {
+    String digits = _sanitizePhoneDigits(phone);
+
+    // Kasus 1: nomor sudah eksplisit pakai '+' -> kode negara sudah pasti benar, tinggal buang '+'
+    if (digits.startsWith('+')) {
+      return digits.substring(1);
+    }
+
+    // Kasus 2: nomor format lokal (diawali '0') -> ga ada info negara, pakai default sebagai fallback
+    if (digits.startsWith('0')) {
+      return '$defaultCountryCode${digits.substring(1)}';
+    }
+
+    // Kasus 3: nomor sudah diawali kode negara tanpa '+' dan tanpa '0' (mis. 60123456789, 6281234567890)
+    // -> dibiarkan apa adanya, tidak dipaksa jadi '62'
+    return digits;
+  }
+
+  Future<void> _launchPhoneCall(String phone) async {
+    final uri = Uri.parse('tel:${_sanitizePhoneDigits(phone)}');
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tidak dapat membuka aplikasi telepon.'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tidak dapat membuka aplikasi telepon.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _launchWhatsApp(String phone) async {
+    final waNumber = _toWhatsAppFormat(phone);
+    final carName = _car?['name'] ?? 'mobil ini';
+    final message = Uri.encodeComponent(
+      'Halo, saya tertarik untuk menyewa $carName.',
+    );
+    final waUri = Uri.parse('https://wa.me/$waNumber?text=$message');
+    try {
+      final launched = await launchUrl(
+        waUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('WhatsApp tidak terpasang di perangkat ini.'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak dapat membuka WhatsApp.')),
+        );
+      }
+    }
   }
 
   Widget _specChip(IconData icon, String label, String value) {
@@ -431,28 +599,32 @@ class _CarDetailPageState extends State<CarDetailPage> {
     final ownerEmail = ownerData != null ? (ownerData['email'] ?? '-') : '';
 
     final personalData = ownerData != null ? ownerData['personal_data'] : null;
-    final ownerPhone = personalData != null ? (personalData['phone'] ?? '-') : '-';
-    final ownerAddress =
-        personalData != null ? (personalData['address'] ?? '-') : '-';
+    final ownerPhone = personalData != null
+        ? (personalData['phone'] ?? '-')
+        : '-';
+    final ownerAddress = personalData != null
+        ? (personalData['address'] ?? '-')
+        : '-';
 
-    final rentalApplication =
-        ownerData != null ? ownerData['rental_application'] : null;
+    final rentalApplication = ownerData != null
+        ? ownerData['rental_application']
+        : null;
     final businessName = rentalApplication != null
         ? (rentalApplication['business_name']?.toString() ?? '')
         : '';
     final businessAddress = rentalApplication != null
         ? (rentalApplication['formatted_address']?.toString() ??
-            rentalApplication['business_address']?.toString() ??
-            '')
+              rentalApplication['business_address']?.toString() ??
+              '')
         : '';
     final double? businessLat =
         rentalApplication != null && rentalApplication['latitude'] != null
-            ? double.tryParse(rentalApplication['latitude'].toString())
-            : null;
+        ? double.tryParse(rentalApplication['latitude'].toString())
+        : null;
     final double? businessLng =
         rentalApplication != null && rentalApplication['longitude'] != null
-            ? double.tryParse(rentalApplication['longitude'].toString())
-            : null;
+        ? double.tryParse(rentalApplication['longitude'].toString())
+        : null;
     final bool hasLocation = businessLat != null && businessLng != null;
 
     final status = _car?['status'] ?? '';
@@ -464,22 +636,22 @@ class _CarDetailPageState extends State<CarDetailPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
-              ? _buildErrorState()
-              : _car == null
-                  ? _buildEmptyState()
-                  : _buildContent(
-                      status,
-                      driverPrice,
-                      ownerName,
-                      ownerEmail,
-                      ownerPhone,
-                      ownerAddress,
-                      businessName,
-                      businessAddress,
-                      businessLat,
-                      businessLng,
-                      hasLocation,
-                    ),
+          ? _buildErrorState()
+          : _car == null
+          ? _buildEmptyState()
+          : _buildContent(
+              status,
+              driverPrice,
+              ownerName,
+              ownerEmail,
+              ownerPhone,
+              ownerAddress,
+              businessName,
+              businessAddress,
+              businessLat,
+              businessLng,
+              hasLocation,
+            ),
       bottomNavigationBar: _isLoading || _car == null || _errorMessage != null
           ? null
           : _buildBottomBar(status),
@@ -499,7 +671,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
                 color: Colors.red.withOpacity(0.08),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.error_outline_rounded, size: 40, color: Colors.red),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 40,
+                color: Colors.red,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -515,8 +691,13 @@ class _CarDetailPageState extends State<CarDetailPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _primaryColor,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
               ),
             ),
           ],
@@ -530,7 +711,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.directions_car_outlined, size: 48, color: Colors.grey.shade400),
+          Icon(
+            Icons.directions_car_outlined,
+            size: 48,
+            color: Colors.grey.shade400,
+          ),
           const SizedBox(height: 12),
           const Text('Data mobil tidak ditemukan.'),
         ],
@@ -539,7 +724,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildHeaderImage() {
-    final hasImage = _car!['image'] != null && _car!['image'].toString().isNotEmpty;
+    final hasImage =
+        _car!['image'] != null && _car!['image'].toString().isNotEmpty;
     final String imageUrl = hasImage ? _getImageUrl(_car!['image']) : '';
     const String heroTag = 'car-detail-photo';
 
@@ -552,10 +738,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
           GestureDetector(
             onTap: hasImage
                 ? () => _openImageViewer(
-                      networkUrl: imageUrl,
-                      heroTag: heroTag,
-                      title: _car!['name'] ?? 'Foto Mobil',
-                    )
+                    networkUrl: imageUrl,
+                    heroTag: heroTag,
+                    title: _car!['name'] ?? 'Foto Mobil',
+                  )
                 : null,
             child: Hero(
               tag: heroTag,
@@ -563,7 +749,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   ? Image.network(
                       imageUrl,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => _buildPlaceholderImage(),
+                      errorBuilder: (context, error, stackTrace) =>
+                          _buildPlaceholderImage(),
                     )
                   : _buildPlaceholderImage(),
             ),
@@ -595,7 +782,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
                 onTap: () => Navigator.pop(context),
                 child: const Padding(
                   padding: EdgeInsets.all(9),
-                  child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                  child: Icon(
+                    Icons.arrow_back_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
               ),
             ),
@@ -616,7 +807,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   ),
                   child: const Padding(
                     padding: EdgeInsets.all(9),
-                    child: Icon(Icons.zoom_in_rounded, color: Colors.white, size: 20),
+                    child: Icon(
+                      Icons.zoom_in_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
@@ -682,7 +877,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   children: [
                     Text(
                       'Harga Sewa / Hari',
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     FittedBox(
@@ -713,7 +911,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   children: [
                     Text(
                       'Jasa Driver / Hari',
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
                     const SizedBox(height: 3),
                     FittedBox(
@@ -740,7 +941,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
             decoration: BoxDecoration(
               color: _getStatusColor(status).withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _getStatusColor(status).withOpacity(0.3)),
+              border: Border.all(
+                color: _getStatusColor(status).withOpacity(0.3),
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -771,17 +974,18 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildContent(
-      String status,
-      dynamic driverPrice,
-      String ownerName,
-      String ownerEmail,
-      String ownerPhone,
-      String ownerAddress,
-      String businessName,
-      String businessAddress,
-      double? businessLat,
-      double? businessLng,
-      bool hasLocation) {
+    String status,
+    dynamic driverPrice,
+    String ownerName,
+    String ownerEmail,
+    String ownerPhone,
+    String ownerAddress,
+    String businessName,
+    String businessAddress,
+    double? businessLat,
+    double? businessLng,
+    bool hasLocation,
+  ) {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _buildHeaderImage()),
@@ -792,7 +996,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 40), 
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
           sliver: SliverToBoxAdapter(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -803,13 +1007,21 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   icon: Icons.person_pin_circle_rounded,
                   iconColor: _primaryColor,
                   children: [
-                    _infoTile(Icons.person_outline, 'Nama Pengelola', ownerName),
+                    _infoTile(
+                      Icons.person_outline,
+                      'Nama Pengelola',
+                      ownerName,
+                    ),
                     if (ownerEmail.isNotEmpty)
                       _infoTile(Icons.email_outlined, 'Email', ownerEmail),
-                    _infoTile(Icons.phone_outlined, 'Nomor HP', ownerPhone),
+                    _buildPhoneTile(ownerPhone),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 0),
-                      child: _infoTile(Icons.location_on_outlined, 'Alamat', ownerAddress),
+                      child: _infoTile(
+                        Icons.location_on_outlined,
+                        'Alamat',
+                        ownerAddress,
+                      ),
                     ),
                   ],
                 ),
@@ -842,27 +1054,46 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       spacing: 10,
                       runSpacing: 10,
                       children: [
-                        _specChip(Icons.confirmation_number_outlined, 'Plat Nomor',
-                            '${_car!['plate_number'] ?? '-'}'),
-                        _specChip(Icons.settings_outlined, 'Tipe Mesin',
-                            '${_car!['engine_type'] ?? '-'}'),
+                        _specChip(
+                          Icons.confirmation_number_outlined,
+                          'Plat Nomor',
+                          '${_car!['plate_number'] ?? '-'}',
+                        ),
+                        _specChip(
+                          Icons.settings_outlined,
+                          'Tipe Mesin',
+                          '${_car!['engine_type'] ?? '-'}',
+                        ),
                         if (_car!['fuel_spec'] != null &&
                             _car!['fuel_spec'].toString().isNotEmpty)
-                          _specChip(Icons.local_gas_station_outlined,
-                              'Spesifikasi BBM', '${_car!['fuel_spec']}'),
-                        _specChip(Icons.airline_seat_recline_normal_outlined,
-                            'Kapasitas Kursi', '${_car!['seats'] ?? '-'} Kursi'),
-                        _specChip(Icons.calendar_today_outlined,
-                            'Tahun Pembuatan', '${_car!['year'] ?? '-'}'),
+                          _specChip(
+                            Icons.local_gas_station_outlined,
+                            'Spesifikasi BBM',
+                            '${_car!['fuel_spec']}',
+                          ),
+                        _specChip(
+                          Icons.airline_seat_recline_normal_outlined,
+                          'Kapasitas Kursi',
+                          '${_car!['seats'] ?? '-'} Kursi',
+                        ),
+                        _specChip(
+                          Icons.calendar_today_outlined,
+                          'Tahun Pembuatan',
+                          '${_car!['year'] ?? '-'}',
+                        ),
                       ],
                     ),
                   ],
                 ),
 
-                if (_isYoutubeVideo || _isVideoLoading || _videoError != null || _chewieController != null)
+                if (_isYoutubeVideo ||
+                    _isVideoLoading ||
+                    _videoError != null ||
+                    _chewieController != null)
                   _sectionCard(
                     title: 'Video Review Kendaraan',
-                    subtitle: 'Lihat lebih dekat kondisi kendaraan sebelum menyewa',
+                    subtitle:
+                        'Lihat lebih dekat kondisi kendaraan sebelum menyewa',
                     icon: Icons.play_circle_outline_rounded,
                     iconColor: _primaryColor,
                     children: [_buildVideoSection()],
@@ -892,7 +1123,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildBusinessLocationSection(
-      String businessAddress, double? lat, double? lng, bool hasLocation) {
+    String businessAddress,
+    double? lat,
+    double? lng,
+    bool hasLocation,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -912,14 +1147,16 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       minZoom: 4.0,
                       maxZoom: 18.0,
                       interactionOptions: const InteractionOptions(
-                        flags: InteractiveFlag.pinchZoom |
+                        flags:
+                            InteractiveFlag.pinchZoom |
                             InteractiveFlag.drag |
                             InteractiveFlag.doubleTapZoom,
                       ),
                     ),
                     children: [
                       TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                         userAgentPackageName: 'com.example.rentalcar',
                       ),
                       MarkerLayer(
@@ -998,7 +1235,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
           ),
         if (businessAddress.isNotEmpty) ...[
           const SizedBox(height: 12),
-          _infoTile(Icons.location_on_outlined, 'Alamat Usaha', businessAddress),
+          _infoTile(
+            Icons.location_on_outlined,
+            'Alamat Usaha',
+            businessAddress,
+          ),
         ],
       ],
     );
@@ -1063,10 +1304,15 @@ class _CarDetailPageState extends State<CarDetailPage> {
   Future<void> _openInGoogleMaps(double lat, double lng) async {
     final label = Uri.encodeComponent(_car?['name'] ?? 'Lokasi Usaha');
     final geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng($label)');
-    final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final webUri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+    );
 
     try {
-      final launched = await launchUrl(geoUri, mode: LaunchMode.externalApplication);
+      final launched = await launchUrl(
+        geoUri,
+        mode: LaunchMode.externalApplication,
+      );
       if (!launched) {
         await launchUrl(webUri, mode: LaunchMode.externalApplication);
       }
@@ -1085,10 +1331,15 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   Future<void> _openDirections(double lat, double lng) async {
     final navUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
-    final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+    final webUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng',
+    );
 
     try {
-      final launched = await launchUrl(navUri, mode: LaunchMode.externalApplication);
+      final launched = await launchUrl(
+        navUri,
+        mode: LaunchMode.externalApplication,
+      );
       if (!launched) {
         await launchUrl(webUri, mode: LaunchMode.externalApplication);
       }
@@ -1108,8 +1359,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
   /// ================= VIDEO SECTION =================
   Widget _buildVideoSection() {
     if (_isYoutubeVideo && _youtubeId != null) {
-      final thumbnailUrl = 'https://img.youtube.com/vi/$_youtubeId/hqdefault.jpg';
-      
+      final thumbnailUrl =
+          'https://img.youtube.com/vi/$_youtubeId/hqdefault.jpg';
+
       return ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: AspectRatio(
@@ -1148,7 +1400,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -1162,10 +1417,16 @@ class _CarDetailPageState extends State<CarDetailPage> {
                                 ),
                                 IconButton(
                                   style: IconButton.styleFrom(
-                                    backgroundColor: Colors.white.withOpacity(0.1),
+                                    backgroundColor: Colors.white.withOpacity(
+                                      0.1,
+                                    ),
                                     padding: const EdgeInsets.all(8),
                                   ),
-                                  icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                                  icon: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
                                   onPressed: () => Navigator.pop(context),
                                 ),
                               ],
@@ -1176,7 +1437,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: YoutubePopupPlayer(youtubeId: _youtubeId!),
                           ),
-                          SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
+                          SizedBox(
+                            height: MediaQuery.of(context).padding.bottom + 16,
+                          ),
                         ],
                       ),
                     ),
@@ -1189,14 +1452,18 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   Image.network(
                     thumbnailUrl,
                     fit: BoxFit.cover,
-                    errorBuilder: (ctx, err, trace) => Container(color: Colors.black),
+                    errorBuilder: (ctx, err, trace) =>
+                        Container(color: Colors.black),
                   ),
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Colors.black.withOpacity(0.6)],
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withOpacity(0.6),
+                        ],
                       ),
                     ),
                   ),
@@ -1214,14 +1481,21 @@ class _CarDetailPageState extends State<CarDetailPage> {
                           ),
                         ],
                       ),
-                      child: const Icon(Icons.play_arrow_rounded, size: 36, color: Colors.white),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        size: 36,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                   Positioned(
                     bottom: 12,
                     left: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.6),
                         borderRadius: BorderRadius.circular(6),
@@ -1229,7 +1503,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.play_circle_fill, size: 14, color: Colors.red),
+                          Icon(
+                            Icons.play_circle_fill,
+                            size: 14,
+                            color: Colors.red,
+                          ),
                           SizedBox(width: 4),
                           Text(
                             'Tonton Video',
@@ -1269,7 +1547,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   child: CircularProgressIndicator(strokeWidth: 2.6),
                 ),
                 const SizedBox(height: 10),
-                Text('Memuat video...', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                Text(
+                  'Memuat video...',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
               ],
             ),
           ),
@@ -1292,7 +1573,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline_rounded, color: Colors.red, size: 26),
+                  const Icon(
+                    Icons.error_outline_rounded,
+                    color: Colors.red,
+                    size: 26,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     _videoError!,
@@ -1311,7 +1596,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
       return ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: AspectRatio(
-          aspectRatio: _chewieController!.videoPlayerController.value.aspectRatio,
+          aspectRatio:
+              _chewieController!.videoPlayerController.value.aspectRatio,
           child: Chewie(controller: _chewieController!),
         ),
       );
@@ -1328,7 +1614,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
       color: Colors.white,
       shadowColor: Colors.black.withOpacity(0.5),
       child: Container(
-        padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          12,
+          16,
+          12 + MediaQuery.of(context).padding.bottom,
+        ),
         child: SizedBox(
           width: double.infinity,
           height: 52,
@@ -1337,7 +1628,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
               backgroundColor: available ? _primaryColor : Colors.grey.shade400,
               foregroundColor: Colors.white,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
             onPressed: available
                 ? () {
@@ -1349,10 +1642,18 @@ class _CarDetailPageState extends State<CarDetailPage> {
                     );
                   }
                 : null,
-            icon: Icon(available ? Icons.directions_car_filled_rounded : Icons.block_rounded, size: 20),
+            icon: Icon(
+              available
+                  ? Icons.directions_car_filled_rounded
+                  : Icons.block_rounded,
+              size: 20,
+            ),
             label: Text(
               available ? 'Sewa Mobil Ini' : 'Mobil Sedang Tidak Tersedia',
-              style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 15.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -1365,7 +1666,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
       width: double.infinity,
       height: 300,
       color: Colors.grey.shade300,
-      child: const Icon(Icons.directions_car_rounded, size: 64, color: Colors.white),
+      child: const Icon(
+        Icons.directions_car_rounded,
+        size: 64,
+        color: Colors.white,
+      ),
     );
   }
 }
@@ -1396,14 +1701,15 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
   @override
   void initState() {
     super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 220),
-    )..addListener(() {
-        if (_animation != null) {
-          _controller.value = _animation!.value;
-        }
-      });
+    _animController =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 220),
+        )..addListener(() {
+          if (_animation != null) {
+            _controller.value = _animation!.value;
+          }
+        });
   }
 
   @override
@@ -1425,8 +1731,10 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
         ..scale(2.8);
     }
 
-    _animation = Matrix4Tween(begin: _controller.value, end: endMatrix)
-        .animate(CurveTween(curve: Curves.easeOut).animate(_animController));
+    _animation = Matrix4Tween(
+      begin: _controller.value,
+      end: endMatrix,
+    ).animate(CurveTween(curve: Curves.easeOut).animate(_animController));
     _animController.forward(from: 0);
   }
 
@@ -1438,7 +1746,10 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
         backgroundColor: Colors.black,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text(
+          widget.title,
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+        ),
       ),
       body: GestureDetector(
         onDoubleTapDown: (details) => _doubleTapDetails = details,
@@ -1554,7 +1865,9 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
 
       try {
         if (isFullScreen) {
-          await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+          await SystemChrome.setEnabledSystemUIMode(
+            SystemUiMode.immersiveSticky,
+          );
           await Future.delayed(const Duration(milliseconds: 50));
           if (_isDisposed) return;
           await SystemChrome.setPreferredOrientations([
@@ -1605,7 +1918,7 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
         DeviceOrientation.portraitDown,
       ]);
 
-      // 4) PERBAIKAN: Diperpanjang menjadi 300ms agar OS Android benar-benar 
+      // 4) PERBAIKAN: Diperpanjang menjadi 300ms agar OS Android benar-benar
       //    selesai menerapkan perubahan UI/orientasi sebelum app lain dibuka
       await Future.delayed(const Duration(milliseconds: 300));
 
@@ -1633,15 +1946,16 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   }
 
   void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   void dispose() {
     _isDisposed = true;
-    _timeTrackerTimer?.cancel(); // 🔽 TAMBAHAN: hentikan polling supaya tidak leak
+    _timeTrackerTimer
+        ?.cancel(); // 🔽 TAMBAHAN: hentikan polling supaya tidak leak
 
     // Kembalikan orientasi layar ke portrait terlebih dahulu
     SystemChrome.setPreferredOrientations([
@@ -1650,7 +1964,7 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    // PERBAIKAN: Gunakan Future.microtask untuk menutup controller secara aman 
+    // PERBAIKAN: Gunakan Future.microtask untuk menutup controller secara aman
     // agar WebView tidak terpotong mendadak saat animasi tutup bottom sheet berjalan
     Future.microtask(() {
       try {
@@ -1670,15 +1984,17 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
           controller: _controller,
           aspectRatio: 16 / 9,
           builder: (context, player) {
-            return Center(
-              child: player,
-            );
+            return Center(child: player);
           },
         ),
         const SizedBox(height: 12),
         TextButton.icon(
           onPressed: _openInYouTubeApp,
-          icon: const Icon(Icons.open_in_new_rounded, size: 16, color: Colors.redAccent),
+          icon: const Icon(
+            Icons.open_in_new_rounded,
+            size: 16,
+            color: Colors.redAccent,
+          ),
           // 🔽 UBAH: label sekarang dinamis, menampilkan menit:detik terakhir
           //    ditonton — sama seperti tombol "Tonton di YouTube (Lanjutkan di M:SS)"
           //    di versi React.

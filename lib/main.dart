@@ -7,8 +7,11 @@ import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/pages/login.dart';
 import 'package:rentalcar/menu/notifikasi.dart';
 import 'package:rentalcar/services/notification_socket_service.dart';
-import 'package:rentalcar/utils/navigation_service.dart'; // 👈 tambahan: sumber navigatorKey
+import 'package:rentalcar/utils/navigation_service.dart'; // 👈 satu-satunya sumber navigatorKey
 import 'firebase_options.dart';
+// 🟢 DIHAPUS: import app_notifier.dart tidak diperlukan di sini lagi.
+// scaffoldMessengerKey sudah tidak dipakai karena AppNotifier sekarang
+// pakai QuickAlert (butuh BuildContext lewat navigatorKey), bukan SnackBar.
 
 // 🟢 Top-level function wajib untuk menangkap pesan FCM saat app di background/killed
 @pragma('vm:entry-point')
@@ -248,7 +251,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey,
+      navigatorKey: navigatorKey, // 🟢 satu-satunya key, dari navigation_service.dart
+      // 🟢 DIHAPUS: scaffoldMessengerKey — sudah tidak dipakai karena
+      // AppNotifier sekarang pakai QuickAlert (dialog, butuh BuildContext
+      // via navigatorKey), bukan SnackBar (yang butuh ScaffoldMessengerKey).
       debugShowCheckedModeBanner: false,
       title: 'Rental Car',
       theme: ThemeData(

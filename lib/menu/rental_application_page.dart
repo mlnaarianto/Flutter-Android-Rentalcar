@@ -6,6 +6,7 @@ import 'package:rentalcar/config/api_config.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:rentalcar/menu/profil.dart'; // 🟢 TAMBAHAN: untuk redirect ke halaman Profil
 
 class RentalApplicationPage extends StatefulWidget {
   const RentalApplicationPage({super.key});
@@ -118,7 +119,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         final addressData = responseData['data'];
-        
+
         if (addressData != null && addressData['formatted_address'] != null) {
           String formattedAddress = addressData['formatted_address'];
           setState(() {
@@ -210,10 +211,31 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
         }
         _fetchApplicationStatus(); // Refresh status
       } else {
-        String errorMessage = responseData['message'] ?? 'Gagal mengirim pengajuan';
-        if (responseData['errors'] != null && responseData['errors']['personal_data'] != null) {
-          errorMessage = responseData['errors']['personal_data'][0];
+        // 🟢 TAMBAHAN: Cek apakah error-nya spesifik "data personal belum lengkap"
+        // (dikirim backend dengan key 'personal_data' di dalam 'errors').
+        // Kalau iya, arahkan user langsung ke halaman Profil untuk melengkapi
+        // data (phone, KTP, SIM) alih-alih cuma menampilkan snackbar biasa.
+        final errors = responseData['errors'];
+        if (errors != null && errors['personal_data'] != null) {
+          final String message = errors['personal_data'][0];
+
+          if (mounted) {
+            _showSnackBar(message, _dangerColor);
+
+            // Jeda sebentar biar snackbar sempat terbaca sebelum pindah halaman
+            await Future.delayed(const Duration(milliseconds: 800));
+
+            if (mounted) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ProfilPage()),
+              );
+            }
+          }
+          return; // Hentikan di sini, jangan lanjut ke throw Exception generic
         }
+
+        String errorMessage = responseData['message'] ?? 'Gagal mengirim pengajuan';
         throw Exception(errorMessage);
       }
     } catch (e) {
@@ -524,7 +546,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
             icon: Icons.store_outlined,
           ),
           const SizedBox(height: 16),
-          
+
           // Widget Peta Flutter Map
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -542,7 +564,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
             ],
           ),
           const SizedBox(height: 6),
-          
+
           Container(
             height: 250,
             width: double.infinity,
@@ -583,7 +605,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                     ),
                   ],
                 ),
-                
+
                 // ➕ ➖ Tombol Zoom In / Zoom Out di Pojok Kanan Bawah Peta
                 Positioned(
                   right: 12,
@@ -627,7 +649,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            _hasSelectedLocation 
+            _hasSelectedLocation
                 ? 'Koordinat: ${_latitude.toStringAsFixed(5)}, ${_longitude.toStringAsFixed(5)}'
                 : 'Ketuk pada peta untuk menandai titik lokasi usaha Anda.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),

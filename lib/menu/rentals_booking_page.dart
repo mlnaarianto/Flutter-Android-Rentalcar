@@ -24,6 +24,11 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   // supaya cuma tombol yang ditekan itu yang menampilkan loading.
   final Set<int> _checkingPaymentIds = {};
 
+  // 👇 DITAMBAHKAN: menyimpan booking id mana saja yang sedang proses
+  // konfirmasi pembayaran tunai (COD), supaya cuma tombol yang ditekan
+  // itu yang menampilkan loading (pola sama seperti _checkingPaymentIds).
+  final Set<int> _confirmingCashIds = {};
+
   static const List<String> _statusOptions = [
     'pending',
     'confirmed',
@@ -36,6 +41,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
   static const Color _bgColor = Color(0xFFF4F6F9);
+  static const Color _successColor = Color(0xFF16A34A);
 
   @override
   void initState() {
@@ -362,6 +368,62 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     }
   }
 
+  // 👇 DITAMBAHKAN: Konfirmasi pembayaran TUNAI (COD) oleh Perental.
+  //
+  // Beda dengan QRIS (yang statusnya diverifikasi otomatis lewat Midtrans),
+  // COD dibayar langsung secara fisik saat serah-terima mobil, jadi tidak
+  // ada gateway pihak ketiga yang bisa dicek. Satu-satunya pihak yang tahu
+  // uang tunai itu benar-benar diterima adalah Perental sendiri, jadi
+  // konfirmasi ini murni aksi manual dari sisi Perental.
+  //
+  // Aman dari sisi keamanan: request ini lewat endpoint
+  // PATCH /bookings/{id}/status yang di backend selalu melewati
+  // $this->authorize('updateStatus', $booking) -- jadi Penyewa TIDAK BISA
+  // memicu endpoint ini sendiri untuk klaim lunas sendiri (beda dengan versi
+  // lama tombol "Simulasi Sudah Bayar" di sisi Penyewa yang sudah dihapus).
+  Future<void> _confirmCashPayment(int bookingId) async {
+    setState(() => _confirmingCashIds.add(bookingId));
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('access_token');
+
+      final response = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/status'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'payment_status': 'paid'}),
+      );
+
+      final decoded = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          _showSnackBar('Pembayaran tunai berhasil dikonfirmasi LUNAS!', _successColor);
+        }
+        _fetchBookings();
+      } else {
+        if (mounted) {
+          _showSnackBar(
+            decoded['message'] ?? 'Gagal mengonfirmasi pembayaran tunai',
+            Colors.red,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Error: $e', Colors.red);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _confirmingCashIds.remove(bookingId));
+      }
+    }
+  }
+
   // Navigasi ke Halaman Chat Perental <-> Penyewa.
   // Di-guard: kalau _currentUserId belum ke-load, JANGAN buka ChatPage --
   // sebelumnya kode ini fallback diam-diam ke '3' dan bisa menghasilkan
@@ -667,6 +729,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     final String paymentMethod = booking['payment_method'] ?? 'cod';
     final bool isPaid = paymentStatus == 'paid';
     final bool isCheckingThisPayment = _checkingPaymentIds.contains(bookingId);
+    final bool isConfirmingThisCash = _confirmingCashIds.contains(bookingId);
 
     final String startDateFormatted = _formatDate(booking['start_date']);
     final String endDateFormatted = _formatDate(booking['end_date']);
@@ -835,6 +898,76 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
             ),
           ],
 
+          // 👇 DITAMBAHKAN: Konfirmasi pembayaran TUNAI (COD).
+          // Muncul hanya untuk booking dengan metode COD yang belum lunas.
+          // Ini satu-satunya cara payment_status COD bisa berubah jadi
+          // 'paid' -- murni aksi manual Perental setelah benar-benar
+          // menerima uang tunai dari penyewa (biasanya saat serah-terima
+          // mobil), karena tidak ada gateway otomatis seperti Midtrans
+          // untuk metode tunai.
+          if (paymentMethod == 'cod' && !isPaid) ...[
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _successColor.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.payments_rounded, size: 15, color: _successColor),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Belum ada konfirmasi penerimaan tunai dari Anda',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11.5,
+                            color: _successColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _successColor,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: isConfirmingThisCash
+                          ? const SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.check_circle_outline_rounded, size: 17),
+                      label: Text(
+                        isConfirmingThisCash ? 'Menyimpan...' : 'Konfirmasi Tunai Diterima',
+                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                      ),
+                      onPressed: isConfirmingThisCash
+                          ? null
+                          : () => _showConfirmCashDialog(bookingId),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           // ===== Info driver (kalau layanan dengan driver) =====
           if (withDriver) ...[
             const SizedBox(height: 12),
@@ -940,6 +1073,44 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 👇 DITAMBAHKAN: dialog konfirmasi sebelum menandai tunai sebagai lunas,
+  // supaya Perental tidak salah tekan (aksi ini tidak ada "undo" otomatis
+  // di UI, meskipun secara teknis bisa diubah lagi lewat status pesanan).
+  void _showConfirmCashDialog(int bookingId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Konfirmasi Pembayaran Tunai',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Pastikan Anda sudah benar-benar menerima uang tunai dari penyewa '
+          'sebelum menandai pesanan ini sebagai LUNAS.',
+          style: TextStyle(color: Colors.grey.shade700, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Batal', style: TextStyle(color: Colors.grey.shade700)),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _confirmCashPayment(bookingId);
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: _successColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Ya, Sudah Diterima'),
           ),
         ],
       ),

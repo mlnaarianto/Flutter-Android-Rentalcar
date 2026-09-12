@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/profil.dart';
+import 'package:rentalcar/menu/booking_history_page.dart'; // 👈 DITAMBAHKAN: dibutuhkan untuk redirect ke Riwayat Pemesanan
 
 class BookingFormPage extends StatefulWidget {
   final Map<String, dynamic> car;
@@ -156,8 +157,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
       final decoded = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
+        // 👇 DIGANTI: dulu cuma Navigator.pop(context, true) (balik ke halaman
+        // sebelumnya / detail mobil). Sekarang, setelah booking sukses,
+        // langsung dilempar ke halaman Riwayat Pemesanan (path menu yang sama:
+        // BookingHistoryPage), dan seluruh stack navigasi sebelumnya
+        // (form + detail mobil) dibersihkan sampai halaman paling awal
+        // (route.isFirst, biasanya Home/Dashboard). Jadi kalau user tekan
+        // tombol back dari halaman Riwayat, dia langsung ke Home, bukan
+        // balik lagi ke form/detail mobil yang sudah tidak relevan.
         _showSnackBar('Booking berhasil dibuat! Silakan cek riwayat pesanan.', _successColor);
-        if (mounted) Navigator.pop(context, true);
+
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const BookingHistoryPage()),
+            (route) => route.isFirst,
+          );
+        }
       } else if (response.statusCode == 403) {
         String message = decoded['message'] ?? 'Akses ditolak.';
 

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart';
@@ -30,6 +31,10 @@ class _ProfilPageState extends State<ProfilPage> {
   final TextEditingController _simTypeController = TextEditingController();
   final TextEditingController _simExpiredController = TextEditingController();
 
+  // 🟢 TAMBAHAN: nomor HP lengkap format internasional (mis. "+6281234567890")
+  // Inilah yang dikirim ke backend, bukan _hpController.text lagi.
+  String _completePhoneNumber = '';
+
   String? avatarUrl;
 
   File? ktpImage;
@@ -44,6 +49,7 @@ class _ProfilPageState extends State<ProfilPage> {
 
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
+  static const Color _dangerColor = Color(0xFFDC2626);
 
   @override
   void initState() {
@@ -113,7 +119,14 @@ class _ProfilPageState extends State<ProfilPage> {
           _namaController.text = userData['name'] ?? '';
           _emailController.text = userData['email'] ?? '';
 
-          _hpController.text = personalData['phone'] ?? '';
+          // Nomor HP yang tersimpan di server (bisa jadi format lama tanpa '+',
+          // atau sudah format internasional). Dipakai sebagai initialValue
+          // IntlPhoneField, dan sebagai fallback _completePhoneNumber sebelum
+          // user mengubahnya.
+          final String rawPhone = personalData['phone'] ?? '';
+          _hpController.text = rawPhone;
+          _completePhoneNumber = rawPhone;
+
           _addressController.text = personalData['address'] ?? '';
           ktpUrl = personalData['ktp_image'];
 
@@ -240,6 +253,42 @@ class _ProfilPageState extends State<ProfilPage> {
     );
   }
 
+  /// ================= HELPER: EKSTRAK PESAN ERROR VALIDASI DARI LARAVEL =================
+  /// 🟢 TAMBAHAN: Laravel mengembalikan HTTP 422 dengan body:
+  /// {
+  ///   "message": "...",
+  ///   "errors": {
+  ///     "phone": ["Nomor HP ini sudah digunakan oleh akun lain"],
+  ///     "sim_number": ["Nomor SIM ini sudah digunakan oleh akun lain"]
+  ///   }
+  /// }
+  /// Fungsi ini mengambil SEMUA pesan dari setiap field yang error, lalu
+  /// menggabungkannya jadi satu string yang bisa ditampilkan ke user
+  /// (bukan cuma "Gagal menyimpan profil (422)" yang tidak informatif).
+  String _extractValidationMessage(Map<String, dynamic> responseData, int statusCode) {
+    final errors = responseData['errors'];
+
+    if (errors is Map<String, dynamic> && errors.isNotEmpty) {
+      final List<String> messages = [];
+      errors.forEach((field, fieldMessages) {
+        if (fieldMessages is List) {
+          for (final msg in fieldMessages) {
+            messages.add(msg.toString());
+          }
+        } else if (fieldMessages != null) {
+          messages.add(fieldMessages.toString());
+        }
+      });
+
+      if (messages.isNotEmpty) {
+        return messages.join('\n');
+      }
+    }
+
+    // Fallback kalau tidak ada 'errors' spesifik, pakai 'message' dari backend
+    return responseData['message'] ?? "Gagal menyimpan profil ($statusCode)";
+  }
+
   /// ================= SAVE =================
   Future<void> _saveProfile() async {
     if (_formKey.currentState!.validate()) {
@@ -278,7 +327,9 @@ class _ProfilPageState extends State<ProfilPage> {
         request.fields['_method'] = 'PATCH';
 
         // Data Personal Umum
-        request.fields['phone'] = _hpController.text;
+        // 🟢 UBAH: pakai nomor lengkap format internasional (+62..., +60..., dst)
+        // yang dihasilkan IntlPhoneField, bukan _hpController.text mentah lagi.
+        request.fields['phone'] = _completePhoneNumber;
         request.fields['birth_date'] = _tglLahirController.text;
         request.fields['address'] = _addressController.text;
 
@@ -302,6 +353,16 @@ class _ProfilPageState extends State<ProfilPage> {
         final streamedResponse = await request.send();
         final response = await http.Response.fromStream(streamedResponse);
 
+        // 🟢 TAMBAHAN: decode body-nya dulu supaya bisa baca 'errors' dari Laravel,
+        // baik untuk kasus sukses (200) maupun gagal (422/500/dll).
+        Map<String, dynamic> responseData = {};
+        try {
+          responseData = jsonDecode(response.body);
+        } catch (_) {
+          // Body bukan JSON valid, biarkan responseData tetap kosong,
+          // nanti fallback ke pesan generic di bawah.
+        }
+
         if (response.statusCode == 200) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -309,13 +370,26 @@ class _ProfilPageState extends State<ProfilPage> {
             );
             Navigator.pop(context, true);
           }
+        } else if (response.statusCode == 422) {
+          // 🟢 TAMBAHAN: Error validasi (nomor HP/SIM sudah dipakai, format salah, dll)
+          // Ambil pesan asli dari backend, bukan pesan generic.
+          final String message = _extractValidationMessage(responseData, response.statusCode);
+          throw Exception(message);
         } else {
-          throw Exception("Gagal menyimpan profil (${response.statusCode})");
+          final String message = responseData['message'] ?? "Gagal menyimpan profil (${response.statusCode})";
+          throw Exception(message);
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString())),
+            SnackBar(
+              content: Text(e.toString().replaceAll('Exception: ', '')),
+              backgroundColor: _dangerColor,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              margin: const EdgeInsets.all(12),
+              duration: const Duration(seconds: 4),
+            ),
           );
         }
       } finally {
@@ -565,6 +639,49 @@ class _ProfilPageState extends State<ProfilPage> {
     );
   }
 
+  /// ================= HELPER UI: FIELD NOMOR HP INTERNASIONAL =================
+  /// 🟢 TAMBAHAN: pengganti _styledField khusus untuk nomor HP, dengan
+  /// dropdown kode negara. Hasil akhirnya (phone.completeNumber) selalu
+  /// berupa format "+<kodenegara><nomor>", disimpan ke _completePhoneNumber.
+  Widget _phoneField() {
+    return IntlPhoneField(
+      initialCountryCode: 'ID', // default Indonesia, user bisa ganti sendiri
+      initialValue: _hpController.text,
+      style: const TextStyle(fontSize: 14.5),
+      dropdownTextStyle: const TextStyle(fontSize: 14.5),
+      decoration: InputDecoration(
+        labelText: "Nomor HP / WhatsApp",
+        filled: true,
+        fillColor: const Color(0xFFF8FAFC),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade200),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        ),
+      ),
+      onChanged: (phone) {
+        // completeNumber selalu diawali '+', mis. "+6281234567890"
+        _completePhoneNumber = phone.completeNumber;
+      },
+      validator: (phone) {
+        if (phone == null || phone.number.isEmpty) {
+          return "Nomor HP wajib diisi";
+        }
+        if (phone.number.length < 6) {
+          return "Nomor HP tidak valid";
+        }
+        return null;
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Versi resolusi menengah untuk avatar bulat kecil, dan resolusi tinggi
@@ -695,17 +812,8 @@ class _ProfilPageState extends State<ProfilPage> {
                         icon: Icons.badge_outlined,
                         iconColor: _accentColor,
                         children: [
-                          _styledField(
-                            controller: _hpController,
-                            label: "Nomor HP / WhatsApp",
-                            icon: Icons.phone_outlined,
-                            keyboardType: TextInputType.phone,
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return "Nomor HP wajib diisi";
-                              if (v.length < 10) return "Nomor HP tidak valid";
-                              return null;
-                            },
-                          ),
+                          // 🟢 UBAH: field HP sekarang pakai IntlPhoneField
+                          _phoneField(),
                           const SizedBox(height: 12),
                           _styledField(
                             controller: _tglLahirController,
