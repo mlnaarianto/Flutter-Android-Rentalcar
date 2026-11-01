@@ -7,6 +7,8 @@ import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/pages/login.dart';
 import 'package:rentalcar/menu/notifikasi.dart';
 import 'package:rentalcar/services/notification_socket_service.dart';
+import 'package:rentalcar/services/token_storage.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
 import 'package:rentalcar/utils/navigation_service.dart'; // 👈 satu-satunya sumber navigatorKey
 import 'firebase_options.dart';
 // 🟢 DIHAPUS: import app_notifier.dart tidak diperlukan di sini lagi.
@@ -79,8 +81,61 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+// 🟢 TAMBAHAN: key prefs milik user yang dibersihkan saat sesi berakhir.
+// 'access_token' ikut dihapus (jembatan sementara dari login.dart).
+const List<String> _userPrefsKeys = [
+  'access_token',
+  'user_id',
+  'user_name',
+  'user_email',
+  'user_roles',
+  'role',
+  'user_permissions',
+  'avatar_url',
+];
+
+// 🟢 TAMBAHAN: guard supaya callback tidak jalan dua kali kalau ada
+// beberapa request yang sama-sama kena sesi mati.
+bool _handlingSessionExpired = false;
+
+/// Dipanggil ApiClient HANYA saat /auth/refresh membalas 401.
+Future<void> _handleSessionExpired() async {
+  if (_handlingSessionExpired) return;
+  _handlingSessionExpired = true;
+
+  try {
+    // Matikan WS dulu supaya tidak reconnect dengan token mati.
+    // (pakai nama method yang ada di NotificationSocketService kamu;
+    // kalau namanya bukan disconnect(), sesuaikan.)
+    try {
+      NotificationSocketService().disconnect();
+    } catch (e) {
+      debugPrint('Disconnect WS saat sesi berakhir gagal: $e');
+    }
+
+    await TokenStorage.clear();
+
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in _userPrefsKeys) {
+      await prefs.remove(key);
+    }
+
+    navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
+  } finally {
+    _handlingSessionExpired = false;
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🟢 TAMBAHAN: pasang callback sesi berakhir. navigatorKey sudah global
+  // (dari navigation_service.dart), jadi aman dipasang sebelum runApp;
+  // pemakaiannya pakai currentState?. jadi aman kalau UI belum siap.
+  ApiClient.onSessionExpired = _handleSessionExpired;
 
   // 1. Inisialisasi Firebase
   try {
@@ -118,18 +173,32 @@ void main() async {
     NotificationSocketService().handleFcmMessage(message);
   });
 
-  // 2. Cek apakah token login sudah ada di SharedPreferences
-  final prefs = await SharedPreferences.getInstance();
-  final String? token = prefs.getString('access_token');
+  // 2. 🟢 DIUBAH: cek sesi lewat refresh token di secure storage
+  // (bukan lagi access_token di SharedPreferences). Access token boleh
+  // sudah kedaluwarsa; ApiClient yang akan me-refresh saat dipakai.
+  final bool hasSession = await TokenStorage.hasSession();
 
-  // 3. Tentukan halaman awal berdasarkan status token
-  final Widget initialScreen = (token != null && token.isNotEmpty)
-      ? const Dashboard()
-      : const LoginPage();
+  // 🟢 MIGRASI: user lama punya 'access_token' di prefs tapi tidak punya
+  // refresh token -> hasSession false -> otomatis ke LoginPage. Bersihkan
+  // token lama itu. Kalau hasSession true, JANGAN dihapus dulu: masih
+  // dipakai jembatan sementara untuk halaman yang belum dimigrasi.
+  // TODO(refresh-token): hapus pengecekan ini + jembatan di login.dart
+  // setelah Fase 5 selesai, ganti dengan prefs.remove('access_token')
+  // tanpa syarat.
+  if (!hasSession) {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.containsKey('access_token')) {
+      await prefs.remove('access_token');
+    }
+  }
+
+  // 3. Tentukan halaman awal berdasarkan status sesi
+  final Widget initialScreen =
+      hasSession ? const Dashboard() : const LoginPage();
 
   // 🟢 Kalau sesi lama masih ada (app dibuka ulang tanpa login baru),
   // langsung sambungkan WebSocket dari sini.
-  if (token != null && token.isNotEmpty) {
+  if (hasSession) {
     NotificationSocketService().connect();
   }
 
