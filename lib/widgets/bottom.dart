@@ -1,6 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/pages/login.dart';
@@ -8,10 +8,27 @@ import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/menu/car.dart';
 import 'package:rentalcar/menu/booking_history_page.dart';
-import 'package:rentalcar/menu/rental_application_page.dart'; // 👈 Import Halaman Pengajuan Perental
+import 'package:rentalcar/menu/rental_application_page.dart'; // Halaman Pengajuan Perental
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart';
-import 'package:rentalcar/services/notification_socket_service.dart'; // 👈 tambahan: hapus token FCM saat logout
+import 'package:rentalcar/services/notification_socket_service.dart'; // hapus token FCM saat logout
+import 'package:rentalcar/services/api_client.dart'; // 🟢 FASE 4: POST /logout lewat ApiClient
+import 'package:rentalcar/services/token_storage.dart'; // 🟢 FASE 4: cek & hapus sesi
+import 'package:rentalcar/utils/navigation_service.dart'; // 🟢 FASE 4: navigatorKey global
+
+// 🟢 FASE 4: key prefs milik user yang dibersihkan saat logout.
+// Sama dengan _userPrefsKeys di main.dart. 'fcm_device_id' SENGAJA tidak
+// ikut dihapus karena itu identitas device, bukan data user.
+const List<String> _userPrefsKeys = [
+  'access_token', // jembatan sementara dari login.dart
+  'user_id',
+  'user_name',
+  'user_email',
+  'user_roles',
+  'role',
+  'user_permissions',
+  'avatar_url',
+];
 
 class Bottom extends StatefulWidget {
   final int currentIndex;
@@ -47,6 +64,94 @@ class _BottomState extends State<Bottom> {
         _avatarUrl = url;
         _userRole = role;
       });
+    }
+  }
+
+  /// ================== PROSES LOGOUT ==================
+  ///
+  /// 🟢 FASE 4. Urutan:
+  ///   1. (kalau sesi masih ada) removeFcmToken, lalu POST /logout
+  ///   2. disconnect WS
+  ///   3. TokenStorage.clear()
+  ///   4. bersihkan prefs
+  ///   5. GoogleSignIn.signOut()
+  ///   6. ke LoginPage
+  ///
+  /// Langkah 2-5 ada di blok `finally`, jadi tetap jalan walau server
+  /// error / timeout / jaringan putus. Logout lokal TIDAK boleh gagal
+  /// hanya karena server tidak terjangkau.
+  ///
+  /// Kalau sesi sudah mati dari awal, langkah 1 dilewati.
+  ///
+  /// Kalau refresh token ternyata mati SAAT langkah 1, ApiClient memicu
+  /// onSessionExpired (main.dart) yang sudah membersihkan semuanya dan
+  /// pindah ke LoginPage. Kita deteksi itu lewat hasSession() dan tidak
+  /// navigasi lagi, supaya LoginPage tidak ditumpuk dua kali.
+  Future<void> _performLogout() async {
+    bool handledByExpiredCallback = false;
+
+    try {
+      if (await TokenStorage.hasSession()) {
+        try {
+          // Hapus token FCM DULU, selagi sesi masih valid -- endpoint-nya
+          // butuh Authorization. Timeout supaya logout tidak menggantung.
+          await NotificationSocketService()
+              .removeFcmToken()
+              .timeout(const Duration(seconds: 10));
+
+          await ApiClient.instance
+              .post(Uri.parse(ApiConfig.logout))
+              .timeout(const Duration(seconds: 10));
+        } catch (e) {
+          // Jaringan putus / timeout / dll: abaikan, lanjut logout lokal.
+          debugPrint('Logout: panggilan server gagal, lanjut logout lokal: $e');
+        }
+
+        // Kalau sesi hilang selama panggilan di atas (refresh membalas 401),
+        // berarti onSessionExpired sudah menangani semuanya, termasuk
+        // navigasi ke LoginPage.
+        handledByExpiredCallback = !await TokenStorage.hasSession();
+      } else {
+        debugPrint('Logout: sesi sudah tidak ada, langsung logout lokal.');
+      }
+    } finally {
+      // Setiap langkah dibungkus try sendiri supaya satu kegagalan tidak
+      // menghentikan langkah berikutnya.
+      try {
+        NotificationSocketService().disconnect();
+      } catch (e) {
+        debugPrint('Logout: disconnect WS gagal: $e');
+      }
+
+      try {
+        await TokenStorage.clear();
+      } catch (e) {
+        debugPrint('Logout: TokenStorage.clear gagal: $e');
+      }
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        for (final key in _userPrefsKeys) {
+          await prefs.remove(key);
+        }
+      } catch (e) {
+        debugPrint('Logout: bersihkan prefs gagal: $e');
+      }
+
+      try {
+        await GoogleSignIn().signOut();
+      } catch (e) {
+        debugPrint('Logout: Google signOut gagal: $e');
+      }
+    }
+
+    // Pakai navigatorKey (bukan context) karena widget ini bisa saja sudah
+    // di-dispose saat sampai di sini.
+    if (!handledByExpiredCallback) {
+      navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (route) => false,
+      );
     }
   }
 
@@ -96,56 +201,7 @@ class _BottomState extends State<Bottom> {
     );
 
     if (result == true) {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final String? token = prefs.getString('access_token');
-
-        if (token != null) {
-          // 🟢 BARU: hapus token FCM device ini dari server DULU,
-          // sebelum access_token dihapus/di-invalidate -- karena
-          // endpoint ini butuh header Authorization yang masih valid.
-          // Tanpa ini, device ini akan TETAP menerima push notification
-          // walau sudah logout, karena baris token di tabel
-          // user_fcm_tokens tidak pernah terhapus.
-          await NotificationSocketService().removeFcmToken(token);
-
-          await http.post(
-            Uri.parse(ApiConfig.logout),
-            headers: {
-              'Accept': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-          );
-        }
-
-        // 🟢 BARU: tutup koneksi WebSocket & reset state service,
-        // supaya kalau ada user login lagi (akun sama/beda) di device
-        // ini, service mulai dari kondisi bersih -- bukan meneruskan
-        // sesi user sebelumnya.
-        NotificationSocketService().disconnect();
-
-        await prefs.remove('access_token');
-        await prefs.remove('avatar_url');
-        await prefs.remove('role');
-        await prefs.remove('user_permissions');
-
-        final GoogleSignIn googleSignIn = GoogleSignIn();
-        await googleSignIn.signOut();
-      } catch (e) {
-        debugPrint('Error saat logout: $e');
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('access_token');
-        await prefs.remove('avatar_url');
-        await prefs.remove('role');
-        await prefs.remove('user_permissions');
-      }
-
-      if (context.mounted) {
-        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-          (route) => false,
-        );
-      }
+      await _performLogout();
     }
   }
 
@@ -288,9 +344,7 @@ class _BottomState extends State<Bottom> {
                 : const AssetImage('assets/anya.jpg'),
           ),
         ),
-        // 👇 Titik kecil penanda "ada menu tambahan" (tahan lama untuk buka).
-        // Sebelumnya fitur long-press ini tidak ada petunjuk visual sama
-        // sekali, jadi kemungkinan besar tidak akan ditemukan user.
+        // Titik kecil penanda "ada menu tambahan" (tahan lama untuk buka).
         Positioned(
           right: -2,
           bottom: -2,
@@ -388,9 +442,7 @@ class _BottomState extends State<Bottom> {
                 ],
               ),
             ),
-            // 👇 Petunjuk kecil biar user TAU kalau long-press avatar bisa
-            // buka menu (sebelumnya fitur ini "tersembunyi" tanpa petunjuk
-            // sama sekali, jadi kemungkinan besar tidak akan ditemukan user).
+            // Petunjuk kecil biar user TAU kalau long-press avatar bisa buka menu.
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(

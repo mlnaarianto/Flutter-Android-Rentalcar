@@ -1,75 +1,57 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform; // 👈 tambahan: deteksi platform android/ios
+import 'dart:io' show Platform; // deteksi platform android/ios
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/menu/notifikasi.dart'; // 👈 tambahan: halaman tujuan tap notifikasi
-import 'package:rentalcar/utils/navigation_service.dart'; // 👈 tambahan: navigatorKey global
+import 'package:rentalcar/menu/notifikasi.dart'; // halaman tujuan tap notifikasi
+import 'package:rentalcar/utils/navigation_service.dart'; // navigatorKey global
+import 'package:rentalcar/services/api_client.dart'; // 🟢 FASE 3: refresh token otomatis
+import 'package:rentalcar/services/token_storage.dart'; // 🟢 FASE 3: cek sesi
 
 /// Service singleton untuk koneksi real-time ke Reverb.
 ///
-/// Kenapa singleton? Karena Navbar dipakai berulang di banyak halaman —
-/// kalau tiap halaman/instance Navbar buka koneksi WebSocket sendiri,
-/// koneksi akan buka-tutup terus-menerus tiap kali pindah halaman.
-/// Dengan singleton, koneksi dibuka SEKALI saat user login, lalu tetap
-/// hidup sepanjang sesi app, dan seluruh halaman tinggal "dengarkan"
-/// statusnya tanpa perlu buka koneksi baru.
+/// Kenapa singleton? Koneksi dibuka SEKALI saat user login (atau app
+/// dibuka dengan sesi lama), lalu tetap hidup sepanjang sesi app, dan
+/// seluruh halaman tinggal "dengarkan" statusnya tanpa buka koneksi baru.
 ///
-/// 🟢 Strategi notifikasi (REVISI):
-/// - Sumber kebenaran untuk "boleh tampil atau tidak" adalah
-///   [_shouldShow], yang dedupe berdasarkan `notification_id`. Ini
-///   dipakai baik di jalur WS maupun jalur FCM, jadi TIDAK PEDULI
-///   keduanya sampai hampir bersamaan (race condition) -- yang kedua
-///   akan otomatis di-skip karena id-nya sudah pernah ditampilkan.
-///   Ini menggantikan strategi lama yang murni mengandalkan status
-///   `_isConnected` sebagai penentu (rawan race & rawan "keduanya
-///   sama-sama merasa berhak tampil" ATAU "keduanya sama-sama merasa
-///   tidak perlu tampil").
-/// - WS dipakai sebagai jalur utama SELAMA channel private-nya benar-benar
-///   sudah "subscribed" (bukan sekadar socket terbuka -- lihat perbedaan
-///   [_isSocketOpen] vs [_isSubscribed] di bawah).
-/// - FCM foreground listener (`handleFcmMessage`) tetap jadi fallback:
-///   ditampilkan kalau WS belum/tidak siap, DAN di-skip lewat dedupe id
-///   kalau ternyata WS sempat lebih dulu menampilkannya.
-/// - Selama app BACKGROUND (proses masih hidup), WS tetap terkoneksi
-///   supaya badge/stream tetap update, tapi tidak menampilkan popup --
-///   itu diserahkan ke background handler FCM di main.dart.
+/// Strategi notifikasi:
+/// - [_shouldShow] dedupe berdasarkan `notification_id`, dipakai di jalur
+///   WS maupun FCM, jadi notifikasi yang sama tidak tampil dua kali.
+/// - WS jadi jalur utama SELAMA channel private-nya sudah "subscribed"
+///   ([_wsReady] = socket terbuka DAN subscribed).
+/// - FCM foreground listener ([handleFcmMessage]) jadi fallback.
+/// - Saat app BACKGROUND, WS tetap hidup untuk badge/stream, tapi popup
+///   diserahkan ke background handler FCM di main.dart.
 ///
-/// 🟢 Navigasi saat notifikasi di-tap:
-/// - Local notification (dari WS/FCM foreground) -> ditangani lewat
-///   `onDidReceiveNotificationResponse` di `_initLocalNotifications()`.
-/// - FCM notification (background/killed) -> ditangani terpisah di
-///   `main.dart` lewat `onMessageOpenedApp` & `getInitialMessage`.
-/// Dua-duanya pakai `navigatorKey` yang sama supaya konsisten menuju
-/// `NotifikasiPage`.
+/// Navigasi saat notifikasi di-tap:
+/// - Local notification (WS/FCM foreground) -> onDidReceiveNotificationResponse
+/// - FCM background/killed -> main.dart (onMessageOpenedApp & getInitialMessage)
 ///
-/// 🟢 Multi-device FCM (REVISI):
-/// Backend sekarang menyimpan token FCM per-device di tabel
-/// `user_fcm_tokens` (bukan lagi 1 kolom tunggal di `users`), supaya
-/// user yang login di beberapa device (mis. HP + web) sama-sama bisa
-/// menerima push. Konsekuensinya:
-/// - `_syncFcmToken()` sekarang ikut kirim `device_id` & `platform`
-///   supaya tiap device tercatat sebagai baris terpisah di backend.
-/// - Ditambahkan `removeFcmToken()` yang WAJIB dipanggil saat logout,
-///   supaya device yang logout tidak terus menerima push notification
-///   selamanya (lihat pemanggilannya di halaman yang memproses logout).
+/// Multi-device FCM:
+/// Token disimpan per-device di tabel `user_fcm_tokens`. `_syncFcmToken()`
+/// mengirim `device_id` & `platform`, dan [removeFcmToken] WAJIB dipanggil
+/// saat logout.
+///
+/// 🟢 FASE 3 (refresh token):
+/// - Semua request HTTP lewat [ApiClient] (header Authorization + refresh
+///   otomatis), tidak ada lagi parameter `token` yang dioper-oper.
+/// - Cek sesi lewat [TokenStorage.hasSession], bukan `access_token` di prefs.
+/// - Reconnect berhenti kalau sesi sudah berakhir.
 class NotificationSocketService {
   NotificationSocketService._internal() {
     _initLocalNotifications();
 
-    // 🟢 Kalau token FCM device berubah (reinstall, clear data, dst),
+    // Kalau token FCM device berubah (reinstall, clear data, dst),
     // sinkron ulang ke server supaya push tetap sampai.
+    // 🟢 FASE 3: cek sesi lewat TokenStorage, token dipasang ApiClient.
     FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-      if (token != null) {
-        await _syncFcmToken(token);
+      if (await TokenStorage.hasSession()) {
+        await _syncFcmToken();
       }
     });
   }
@@ -82,20 +64,12 @@ class NotificationSocketService {
   StreamSubscription? _wsSubscription;
   String? _socketId;
 
-  // 🟢 REVISI: dipecah jadi dua flag terpisah, karena "socket terbuka"
-  // dan "channel private siap menerima event" adalah dua hal yang
-  // BEDA WAKTU. Yang lama cuma pakai satu flag (_isConnected) yang
-  // di-set true begitu WebSocketChannel.connect() dipanggil -- padahal
-  // saat itu proses auth+subscribe ke channel private BELUM selesai,
-  // sehingga ada jendela waktu di mana _isConnected sudah true tapi WS
-  // belum benar-benar bisa terima event apa pun. Di jendela itu,
-  // handleFcmMessage() akan salah mengira WS "aktif" dan membuang FCM,
-  // padahal WS juga belum dengar apa-apa -> notifikasi hilang total.
+  // "socket terbuka" dan "channel private siap menerima event" adalah dua
+  // hal yang BEDA WAKTU, jadi dipisah jadi dua flag.
   bool _isSocketOpen = false; // WebSocket sudah terbuka (raw connection)
   bool _isSubscribed = false; // channel private sudah confirmed subscribed
 
-  /// WS dianggap "siap" jadi sumber notifikasi hanya kalau socket terbuka
-  /// DAN subscription ke channel private sudah confirmed sukses.
+  /// WS dianggap "siap" hanya kalau socket terbuka DAN sudah subscribed.
   bool get _wsReady => _isSocketOpen && _isSubscribed;
 
   String? _connectedUserId;
@@ -111,27 +85,17 @@ class NotificationSocketService {
   Stream<Map<String, dynamic>> get onNewNotification =>
       _newNotificationController.stream;
 
-  /// Dipertahankan untuk kompatibilitas kode lain yang mungkin sudah
-  /// membaca `isConnected` (mis. UI indikator status). Sekarang artinya
-  /// "WS benar-benar siap terima event", bukan sekadar socket terbuka.
+  /// Dipertahankan untuk kompatibilitas kode lain. Artinya "WS benar-benar
+  /// siap terima event", bukan sekadar socket terbuka.
   bool get isConnected => _wsReady;
 
-  /// 🟢 REVISI: dedupe berbasis notification_id. Ini KUNCI supaya
-  /// notifikasi yang sama tidak tampil dua kali walau datang dari dua
-  /// jalur berbeda (WS + FCM) hampir bersamaan. Dipakai baik di
-  /// `_handleMessage` (jalur WS) maupun `handleFcmMessage` (jalur FCM).
-  ///
-  /// Disimpan sebagai in-memory Set (bukan persisted) karena tujuannya
-  /// cuma mencegah dobel dalam satu sesi app yang sedang berjalan --
-  /// bukan riwayat baca/belum-baca (itu sudah ditangani server lewat
-  /// field is_read).
+  /// Dedupe berbasis notification_id (in-memory, per sesi app).
   final Set<String> _shownNotificationIds = {};
   static const int _maxTrackedIds = 200;
 
   bool _shouldShow(dynamic notificationId) {
     if (notificationId == null) {
-      // Tidak ada id untuk dedupe -> tetap tampilkan (fail-open), supaya
-      // tidak ada notifikasi yang hilang gara-gara payload tidak lengkap.
+      // Tidak ada id untuk dedupe -> tetap tampilkan (fail-open).
       return true;
     }
     final id = notificationId.toString();
@@ -146,20 +110,9 @@ class NotificationSocketService {
     return true;
   }
 
-  /// 🟢 Status apakah app sedang di foreground atau tidak.
-  /// Di-set dari main.dart lewat WidgetsBindingObserver.
-  /// Dipakai supaya WS tidak menampilkan notifikasi sendiri saat app
-  /// di background -- biar OS yang otomatis tampilkan dari payload FCM
-  /// (hindari dobel notifikasi), sementara WS tetap hidup untuk update
-  /// badge/stream data secara real-time.
-  ///
-  /// CATATAN: sengaja HANYA di-set false untuk AppLifecycleState.paused
-  /// / hidden / detached di main.dart, TIDAK untuk `inactive`. State
-  /// `inactive` bisa terpicu saat app masih kelihatan tapi sedang
-  /// diinterupsi sesaat (notification shade ditarik, dialog sistem,
-  /// incoming call overlay) -- kalau ikut dianggap "background" di
-  /// situ, notifikasi yang masuk tepat di momen itu bisa tidak
-  /// ditampilkan oleh WS maupun FCM foreground listener.
+  /// Status foreground/background, di-set dari main.dart lewat
+  /// WidgetsBindingObserver. HANYA di-set false untuk paused/hidden/detached,
+  /// TIDAK untuk `inactive` (interupsi sesaat).
   bool _isAppInForeground = true;
   set isAppInForeground(bool value) {
     _isAppInForeground = value;
@@ -168,10 +121,8 @@ class NotificationSocketService {
   final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
-  /// Inisialisasi setting local notifications untuk Android & iOS.
-  ///
-  /// PENTING: nama parameternya adalah `settings` (dikonfirmasi dari source
-  /// code resmi paket ini), bukan `initSettings` maupun `initializationSettings`.
+  /// Inisialisasi local notifications.
+  /// PENTING: nama parameternya `settings` (flutter_local_notifications v22).
   Future<void> _initLocalNotifications() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -186,42 +137,22 @@ class NotificationSocketService {
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         debugPrint('Notifikasi di-tap: ${response.payload}');
 
-        // 🟢 Arahkan ke NotifikasiPage saat local notification (dari WS)
-        // di-tap.
-        //
-        // CATATAN: sengaja TIDAK dibungkus addPostFrameCallback di sini.
-        // Callback ini terpanggil saat app sudah berjalan normal (bukan
-        // saat cold-start seperti kasus FCM getInitialMessage), jadi
-        // tidak ada frame baru yang otomatis di-schedule -- akibatnya
-        // addPostFrameCallback tidak pernah terpanggil dan push() gagal
-        // diam-diam. Push langsung di sini aman karena navigatorKey
-        // hampir selalu sudah siap; kalau pun belum, _navigateToNotifikasi
-        // akan retry singkat.
+        // Sengaja TIDAK dibungkus addPostFrameCallback: callback ini
+        // terpanggil saat app sudah berjalan normal, jadi tidak ada frame
+        // baru yang di-schedule. _navigateToNotifikasi punya retry singkat.
         _navigateToNotifikasi();
       },
     );
 
-    // Android 13+ (API 33) mewajibkan izin runtime untuk menampilkan
-    // notifikasi sistem. Tanpa ini, show() akan gagal diam-diam
-    // (tidak ada error, tapi notifikasi tidak pernah muncul).
-    //
-    // CATATAN: sengaja TIDAK ditulis pakai syntax generic eksplisit
-    // resolvePlatformSpecificImplementation<Tipe>() — karena tipe di
-    // dalam kurung siku itu berulang kali hilang saat disalin.
-    // Solusinya: deklarasikan tipe variabelnya, biar Dart infer sendiri
-    // argumen generic-nya dari situ, tanpa perlu menulis tanda < >.
+    // Android 13+ (API 33) mewajibkan izin runtime untuk notifikasi.
+    // Tipe variabel dideklarasikan supaya Dart meng-infer generic-nya.
     final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
         _localNotificationsPlugin.resolvePlatformSpecificImplementation();
     await androidImplementation?.requestNotificationsPermission();
   }
 
-  /// 🟢 Navigasi ke NotifikasiPage, dipanggil saat local notification
-  /// (dari WS) di-tap.
-  ///
-  /// Kalau `navigatorKey.currentState` masih null (jarang terjadi,
-  /// misalnya app baru saja resume dari background dan widget tree
-  /// belum sempat ter-attach), coba lagi tiap 100ms sampai maksimal
-  /// 5 kali (~500ms) sebelum menyerah.
+  /// Navigasi ke NotifikasiPage. Kalau `navigatorKey.currentState` masih
+  /// null, coba lagi tiap 100ms maksimal 5 kali sebelum menyerah.
   void _navigateToNotifikasi({int attempt = 0}) {
     final state = navigatorKey.currentState;
     if (state != null) {
@@ -243,10 +174,8 @@ class NotificationSocketService {
     });
   }
 
-  /// Menampilkan banner pop-up notifikasi di luar aplikasi (Status Bar).
-  ///
-  /// PENTING: mulai flutter_local_notifications v22, show() memakai
-  /// NAMED parameter untuk id, title, body, dan notificationDetails.
+  /// Menampilkan banner pop-up notifikasi di status bar.
+  /// flutter_local_notifications v22: show() memakai NAMED parameter.
   Future<void> _showSystemNotification(String title, String body) async {
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
         AndroidNotificationDetails(
@@ -275,14 +204,8 @@ class NotificationSocketService {
 
   static const String _deviceIdPrefsKey = 'fcm_device_id';
 
-  /// 🟢 BARU: ambil device_id yang persisten untuk device ini. Kalau
-  /// belum pernah dibuat, generate sekali dan simpan permanen di
-  /// SharedPreferences -- ini yang membedakan device ini dari device
-  /// lain milik user yang sama di tabel `user_fcm_tokens` backend.
-  ///
-  /// Sengaja pakai random string manual (bukan package `uuid` terpisah)
-  /// supaya tidak perlu tambah dependency baru -- cukup unik untuk
-  /// tujuan pembeda device, tidak perlu benar-benar UUID v4 standar.
+  /// device_id persisten untuk device ini (dibuat sekali, disimpan permanen
+  /// di SharedPreferences).
   Future<String> _getOrCreateDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
     String? deviceId = prefs.getString(_deviceIdPrefsKey);
@@ -296,25 +219,16 @@ class NotificationSocketService {
     return deviceId;
   }
 
-  /// 🟢 BARU: nama platform untuk dikirim ke backend (kolom `platform`
-  /// di tabel `user_fcm_tokens`), berguna untuk debug/filter nanti.
+  /// Nama platform untuk dikirim ke backend (kolom `platform`).
   String get _platformName {
     if (Platform.isAndroid) return 'android';
     if (Platform.isIOS) return 'ios';
     return 'unknown';
   }
 
-  /// 🟢 Kirim/update token FCM device ini ke server, supaya backend
-  /// bisa kirim push notification lewat Firebase saat WS tidak aktif.
-  /// Endpoint disesuaikan dengan routes/api.php: POST /api/fcm-token.
-  ///
-  /// 🟢 DIPERBAIKI: sekarang ikut kirim device_id & platform, karena
-  /// backend sudah pindah dari 1 kolom fcm_token tunggal ke tabel
-  /// user_fcm_tokens (banyak baris per user, 1 per device). Tanpa
-  /// device_id, token tetap tersimpan benar (key uniknya tetap di
-  /// kolom token), tapi device_id membantu membedakan device mana yang
-  /// mendaftarkan token yang mana saat debug.
-  Future<void> _syncFcmToken(String token) async {
+  /// Kirim/update token FCM device ini ke server (POST /api/fcm-token).
+  /// 🟢 FASE 3: pakai ApiClient, tanpa parameter token.
+  Future<void> _syncFcmToken() async {
     try {
       final fcmToken = await FirebaseMessaging.instance.getToken();
       if (fcmToken == null) {
@@ -324,12 +238,8 @@ class NotificationSocketService {
 
       final deviceId = await _getOrCreateDeviceId();
 
-      final response = await http.post(
+      final response = await ApiClient.instance.post(
         Uri.parse('${ApiConfig.baseUrl}/fcm-token'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
         body: {
           'fcm_token': fcmToken,
           'device_id': deviceId,
@@ -348,15 +258,10 @@ class NotificationSocketService {
     }
   }
 
-  /// 🟢 BARU: hapus token FCM device ini dari server. WAJIB dipanggil
-  /// saat logout, SEBELUM access_token dihapus dari SharedPreferences --
-  /// karena endpoint DELETE /api/fcm-token butuh header Authorization
-  /// yang masih valid.
-  ///
-  /// Tanpa ini, device yang logout akan TETAP menerima push notification
-  /// selamanya (baris token di tabel user_fcm_tokens tidak pernah
-  /// terhapus), walau user sudah keluar dari akunnya di device ini.
-  Future<void> removeFcmToken(String accessToken) async {
+  /// Hapus token FCM device ini dari server. WAJIB dipanggil saat logout,
+  /// SEBELUM TokenStorage.clear().
+  /// 🟢 FASE 3: pakai ApiClient, tanpa parameter token.
+  Future<void> removeFcmToken() async {
     try {
       final fcmToken = await FirebaseMessaging.instance.getToken();
       if (fcmToken == null) {
@@ -364,12 +269,8 @@ class NotificationSocketService {
         return;
       }
 
-      final response = await http.delete(
+      final response = await ApiClient.instance.delete(
         Uri.parse('${ApiConfig.baseUrl}/fcm-token'),
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-          'Accept': 'application/json',
-        },
         body: {'fcm_token': fcmToken},
       );
 
@@ -384,22 +285,22 @@ class NotificationSocketService {
     }
   }
 
+  bool _isConnecting = false;
+
   Future<void> connect() async {
-    // 🟢 Guard: kalau sudah siap penuh (socket terbuka + subscribed)
-    // untuk user yang sama, tidak perlu connect ulang. Sebelumnya
-    // pengecekan ini pakai _isConnected yang di-set optimistik di awal
-    // proses connect -- sekarang pakai _wsReady supaya lebih akurat.
     if (_isConnecting) {
       debugPrint('Reverb Service: sedang proses connect, skip panggilan dobel.');
       return;
     }
 
+    // 🟢 FASE 3: cek sesi lewat TokenStorage (refresh token), bukan
+    // access_token di prefs. Access token boleh sudah kedaluwarsa;
+    // ApiClient yang akan me-refresh saat request pertama.
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token');
     final userId = prefs.getString('user_id');
 
-    if (token == null || userId == null) {
-      debugPrint('Reverb Service: token/userId belum tersedia, skip connect.');
+    if (!await TokenStorage.hasSession() || userId == null) {
+      debugPrint('Reverb Service: sesi/userId belum tersedia, skip connect.');
       return;
     }
 
@@ -410,13 +311,13 @@ class NotificationSocketService {
           'Reverb Service: user berganti ($_connectedUserId -> $userId), reconnect...');
       _hardDisconnect(resetUnread: true);
     } else if (_wsReady) {
-      debugPrint('Reverb Service: sudah terkoneksi & subscribed untuk user ini, skip.');
+      debugPrint(
+          'Reverb Service: sudah terkoneksi & subscribed untuk user ini, skip.');
       return;
     } else if (_isSocketOpen && !isUserSwitch) {
-      // Socket masih terbuka tapi belum subscribed (mis. proses auth
-      // masih berjalan) -- jangan buka koneksi baru, biarkan proses
-      // subscribe yang sedang berjalan menyelesaikan dirinya sendiri.
-      debugPrint('Reverb Service: socket masih terbuka & menunggu subscribe, skip.');
+      // Socket terbuka tapi belum subscribed (proses auth masih berjalan).
+      debugPrint(
+          'Reverb Service: socket masih terbuka & menunggu subscribe, skip.');
       return;
     }
 
@@ -424,12 +325,11 @@ class NotificationSocketService {
 
     final isFirstConnectForUser = _connectedUserId != userId;
     if (isFirstConnectForUser) {
-      await _checkInitialUnreadStatus(token);
+      await _checkInitialUnreadStatus();
     }
 
-    // 🟢 Pastikan server selalu punya FCM token terbaru device ini,
-    // supaya fallback push bisa jalan kapan pun WS putus/app background.
-    await _syncFcmToken(token);
+    // Pastikan server selalu punya FCM token terbaru device ini.
+    await _syncFcmToken();
 
     final apiUri = Uri.parse(ApiConfig.baseUrl);
     const reverbPort = 9090;
@@ -454,12 +354,12 @@ class NotificationSocketService {
     try {
       _wsChannel = WebSocketChannel.connect(wsUri);
       _isSocketOpen = true;
-      _isSubscribed = false; // 👈 penting: belum subscribed sampai confirmed
+      _isSubscribed = false; // belum subscribed sampai confirmed
       _connectedUserId = userId;
       _reconnectAttempt = 0;
 
       _wsSubscription = _wsChannel!.stream.listen(
-        (raw) => _handleMessage(raw, userId, token, apiUri),
+        (raw) => _handleMessage(raw, userId, apiUri),
         onError: (e) {
           debugPrint('Reverb Service: WS error: $e');
           _isSocketOpen = false;
@@ -484,8 +384,12 @@ class NotificationSocketService {
     }
   }
 
-  bool _isConnecting = false;
-
+  /// 🟢 FASE 3: pengecekan sesi ditaruh DI DALAM timer, bukan di awal.
+  /// Ada race: saat /auth/refresh membalas 401, onSessionExpired memanggil
+  /// disconnect() (membatalkan timer), lalu request /broadcasting/auth yang
+  /// gagal kembali ke _subscribeToChannel dan memanggil _scheduleReconnect()
+  /// lagi -> timer baru terbentuk SETELAH disconnect(). Cek di dalam timer
+  /// memastikan reconnect batal kalau sesi sudah dibersihkan.
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
 
@@ -494,19 +398,21 @@ class NotificationSocketService {
     _reconnectAttempt++;
 
     debugPrint('Reverb Service: reconnect dalam ${delay.inSeconds}s...');
-    _reconnectTimer = Timer(delay, () {
+    _reconnectTimer = Timer(delay, () async {
+      if (!await TokenStorage.hasSession()) {
+        debugPrint('Reverb Service: sesi berakhir, reconnect dibatalkan.');
+        _reconnectAttempt = 0;
+        return;
+      }
       if (!_wsReady) connect();
     });
   }
 
-  Future<void> _checkInitialUnreadStatus(String token) async {
+  /// 🟢 FASE 3: pakai ApiClient, tanpa parameter token.
+  Future<void> _checkInitialUnreadStatus() async {
     try {
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/notifications'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
       );
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -517,10 +423,10 @@ class NotificationSocketService {
     } catch (_) {}
   }
 
+  /// 🟢 FASE 3: parameter token dihapus.
   void _handleMessage(
     dynamic raw,
     String userId,
-    String token,
     Uri apiUri,
   ) async {
     try {
@@ -530,15 +436,11 @@ class NotificationSocketService {
       if (event == 'pusher:connection_established') {
         final connData = jsonDecode(msg['data']);
         _socketId = connData['socket_id'];
-        await _subscribeToChannel(userId, token, apiUri);
+        await _subscribeToChannel(userId, apiUri);
         return;
       }
 
-      // 🟢 BARU: konfirmasi subscribe sukses. Baru dari titik ini WS
-      // benar-benar dianggap siap jadi sumber notifikasi (_wsReady).
-      // Nama event bisa "pusher:subscription_succeeded" (protokol umum)
-      // -- dijaga longgar dengan endsWith supaya tidak pecah kalau
-      // Reverb mengirim varian namespace-nya.
+      // Konfirmasi subscribe sukses. Baru dari titik ini WS dianggap siap.
       if (event != null &&
           event.toString().contains('subscription_succeeded')) {
         _isSubscribed = true;
@@ -546,10 +448,7 @@ class NotificationSocketService {
         return;
       }
 
-      // 🟢 BARU: kalau subscribe gagal, jangan biarkan _isSubscribed
-      // tetap false diam-diam tanpa penjelasan -- log & coba reconnect,
-      // supaya tidak ada sesi yang "kelihatan konek" padahal channel-nya
-      // tidak pernah aktif.
+      // Subscribe gagal: log & coba reconnect.
       if (event != null && event.toString().contains('subscription_error')) {
         debugPrint('Reverb Service: subscribe GAGAL: ${msg['data']}');
         _isSubscribed = false;
@@ -561,17 +460,10 @@ class NotificationSocketService {
         final payload = jsonDecode(msg['data']);
         final newNotif = payload['data'];
 
-        // Badge navbar langsung menyala -- ini tetap jalan baik
-        // foreground maupun background, karena cuma update state,
-        // bukan menampilkan sesuatu ke user.
+        // Badge langsung menyala (foreground maupun background).
         hasUnread.value = true;
 
-        // 🟢 REVISI: dedupe dulu berdasarkan notification_id SEBELUM
-        // memutuskan tampil atau tidak. Ini independen dari status
-        // foreground/background & independen dari FCM -- jadi walau
-        // FCM juga mencoba menampilkan notifikasi yang sama, salah
-        // satu (siapa pun yang lebih dulu) akan menang dan yang kedua
-        // otomatis di-skip.
+        // Dedupe dulu berdasarkan notification_id sebelum memutuskan tampil.
         final notifId = newNotif is Map ? newNotif['id'] : null;
 
         if (_isAppInForeground && _shouldShow(notifId)) {
@@ -584,7 +476,7 @@ class NotificationSocketService {
               'Reverb Service: app di background, notifikasi diserahkan ke FCM (tidak tampil dari WS).');
         }
 
-        // Teruskan ke halaman yang sedang aktif mendengarkan (NotifikasiPage)
+        // Teruskan ke halaman yang sedang mendengarkan (NotifikasiPage)
         _newNotificationController.add(newNotif);
       }
     } catch (e) {
@@ -592,34 +484,24 @@ class NotificationSocketService {
     }
   }
 
-  /// 🟢 Dipanggil dari main.dart (FirebaseMessaging.onMessage) tiap ada
-  /// pesan FCM masuk selagi app foreground.
-  ///
-  /// REVISI: sebelumnya cuma dicek `_isConnected` (yang di-set optimistik
-  /// begitu socket dibuka, walau channel private belum tentu subscribed).
-  /// Sekarang dicek `_wsReady` (socket terbuka DAN subscribed), DAN tetap
-  /// di-dedupe lewat `_shouldShow` berdasarkan notification_id -- supaya
-  /// walau kondisi timing pas-pasan (mis. WS baru saja subscribed detik
-  /// itu juga dan sempat menampilkan notifikasi yang sama), FCM tidak
-  /// ikut menampilkannya dobel.
+  /// Dipanggil dari main.dart (FirebaseMessaging.onMessage) tiap ada pesan
+  /// FCM masuk selagi app foreground. Dicek `_wsReady` + dedupe id.
   void handleFcmMessage(RemoteMessage message) {
     final data = message.data;
     final notifId = data['notification_id'];
 
     if (_wsReady) {
-      debugPrint('Reverb Service: WS siap & subscribed, abaikan FCM (hindari duplikat).');
+      debugPrint(
+          'Reverb Service: WS siap & subscribed, abaikan FCM (hindari duplikat).');
       return;
     }
 
     if (!_shouldShow(notifId)) {
-      // Sudah pernah ditampilkan (kemungkinan besar oleh WS tepat
-      // sebelum ini, atau oleh panggilan FCM lain yang duplikat).
       return;
     }
 
-    final title = message.notification?.title ??
-        data['title'] ??
-        'Informasi Rental';
+    final title =
+        message.notification?.title ?? data['title'] ?? 'Informasi Rental';
     final body = message.notification?.body ??
         data['message'] ??
         'Anda memiliki aktivitas baru.';
@@ -636,9 +518,9 @@ class NotificationSocketService {
     });
   }
 
+  /// 🟢 FASE 3: parameter token dihapus, pakai ApiClient.
   Future<void> _subscribeToChannel(
     String userId,
-    String token,
     Uri apiUri,
   ) async {
     if (_socketId == null) return;
@@ -652,12 +534,8 @@ class NotificationSocketService {
     );
 
     try {
-      final authResponse = await http.post(
+      final authResponse = await ApiClient.instance.post(
         authUrl,
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
         body: {
           'socket_id': _socketId,
           'channel_name': channelName,
@@ -667,11 +545,8 @@ class NotificationSocketService {
       if (authResponse.statusCode != 200) {
         debugPrint(
             'Reverb Service: broadcasting auth gagal (${authResponse.statusCode})');
-        // 🟢 BARU: sebelumnya di sini diam saja, dan _isConnected (lama)
-        // sudah kadung true -- jadi sesi ini akan tampak "konek" padahal
-        // channel-nya tidak akan pernah aktif sampai reconnect manual.
-        // Sekarang dipicu reconnect supaya percobaan berikutnya bisa
-        // memperbaiki dirinya sendiri.
+        // Picu reconnect supaya percobaan berikutnya bisa memperbaiki diri
+        // (dibatalkan otomatis di _scheduleReconnect kalau sesi sudah mati).
         _isSubscribed = false;
         _scheduleReconnect();
         return;
@@ -687,10 +562,8 @@ class NotificationSocketService {
         },
       }));
 
-      // Catatan: _isSubscribed baru di-set true saat menerima event
-      // "pusher:subscription_succeeded" balik dari server (lihat
-      // _handleMessage), BUKAN di sini -- supaya benar-benar
-      // dikonfirmasi server, bukan diasumsikan sepihak dari klien.
+      // _isSubscribed baru di-set true saat menerima
+      // "pusher:subscription_succeeded" dari server (lihat _handleMessage).
     } catch (e) {
       debugPrint('Reverb Service: gagal subscribe: $e');
       _isSubscribed = false;
@@ -709,10 +582,8 @@ class NotificationSocketService {
     if (resetUnread) hasUnread.value = false;
   }
 
-  /// 🟢 Dipanggil saat app benar-benar ditutup/di-swipe (bukan sekadar
-  /// diminimize). WebSocket ditutup untuk hemat resource, tapi
-  /// `_connectedUserId` TIDAK direset — supaya reconnect saat app dibuka
-  /// lagi bisa lebih cepat.
+  /// Dipanggil saat app benar-benar ditutup/di-swipe. WebSocket ditutup
+  /// untuk hemat resource, `_connectedUserId` TIDAK direset.
   void pause() {
     _reconnectTimer?.cancel();
     _wsSubscription?.cancel();

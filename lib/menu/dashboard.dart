@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:rentalcar/services/api_client.dart'; // 🟢 refresh token otomatis
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
@@ -70,35 +70,31 @@ class _DashboardState extends State<Dashboard> {
 
   /// Mengambil data mobil dari API Laravel
   Future<void> _fetchDashboardCars() async {
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
-
-      if (token == null) return;
-
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/cars'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      // Token, header Accept/Authorization, dan refresh otomatis
+      // ditangani ApiClient.
+      final response = await ApiClient.instance
+          .get(Uri.parse('${ApiConfig.baseUrl}/cars'))
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final decodedData = jsonDecode(response.body);
         final listCars = decodedData['data'] ?? [];
+        if (!mounted) return;
         setState(() {
           _allCars = listCars;
           _filteredCars = listCars;
-          _isLoading = false;
         });
       } else {
-        setState(() => _isLoading = false);
+        debugPrint('Dashboard: gagal ambil mobil (${response.statusCode})');
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      debugPrint('Dashboard: error ambil mobil: $e');
+    } finally {
+      // Selalu matikan spinner, apa pun hasilnya.
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
