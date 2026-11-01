@@ -7,6 +7,7 @@ import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
 import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/services/token_storage.dart'; // 🟢 TAMBAHAN: secure storage
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -65,6 +66,7 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('Mengirim ke Laravel: ${ApiConfig.googleLogin}');
 
       // Hit API Backend Laravel
+      // (sengaja pakai http biasa, bukan ApiClient: belum ada token saat login)
       final response = await http
           .post(
             Uri.parse(ApiConfig.googleLogin),
@@ -89,12 +91,29 @@ class _LoginPageState extends State<LoginPage> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['status'] == 'success') {
-        final String sanctumToken = data['access_token'];
+        final String? accessToken = data['access_token'] as String?;
+        final String? refreshToken = data['refresh_token'] as String?;
+        final num? expiresIn = data['expires_in'] as num?;
         final userData = data['user'];
 
-        // Simpan token dan data user ke SharedPreferences
+        if (accessToken == null || refreshToken == null || expiresIn == null) {
+          throw Exception('Respons login dari server tidak lengkap.');
+        }
+
+        // 🟢 Simpan token ke secure storage (bukan SharedPreferences lagi)
+        await TokenStorage.save(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          expiresIn: expiresIn.toInt(),
+        );
+
+        // Data user non-sensitif tetap di SharedPreferences
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('access_token', sanctumToken);
+
+        // TODO(refresh-token): JEMBATAN SEMENTARA. Halaman lain masih membaca
+        // prefs 'access_token' sampai Fase 5 selesai. HAPUS baris ini setelah
+        // semua halaman dimigrasi ke ApiClient.
+        await prefs.setString('access_token', accessToken);
 
         if (userData != null) {
           if (userData['id'] != null) {
@@ -132,7 +151,7 @@ class _LoginPageState extends State<LoginPage> {
         debugPrint('✅ Login sukses! User ID: ${userData?['id']} | Email: ${userData?['email']}');
 
         // 🟢 TAMBAHAN: mulai koneksi real-time SEKALI di sini, tepat
-        // setelah token & user_id tersimpan ke SharedPreferences.
+        // setelah token & user_id tersimpan.
         // Sengaja tidak di-"await" — biar navigasi ke Dashboard tidak
         // ikut menunggu proses koneksi WebSocket selesai dulu.
         //
