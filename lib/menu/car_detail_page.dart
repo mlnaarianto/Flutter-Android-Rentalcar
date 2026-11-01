@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
@@ -12,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/menu/booking_form_page.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
@@ -53,6 +52,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
     _fetchCarDetail();
   }
 
+  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchCarDetail() async {
     setState(() {
       _isLoading = true;
@@ -60,24 +61,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) {
-        setState(() {
-          _errorMessage = 'Sesi habis. Silakan login kembali.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/cars/${widget.carId}'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -99,6 +87,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
           _car = carData;
           _isLoading = false;
         });
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = 'Sesi habis. Silakan login kembali.';
+          _isLoading = false;
+        });
       } else {
         setState(() {
           _errorMessage =
@@ -107,6 +100,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Terjadi kesalahan koneksi: $e';
         _isLoading = false;
@@ -125,6 +119,13 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
+
+      // Halaman sudah ditutup saat video masih dimuat: buang controller
+      // supaya tidak bocor.
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
 
       final chewie = ChewieController(
         videoPlayerController: controller,
@@ -147,6 +148,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
         _isVideoLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _videoError = 'Video tidak dapat dimuat: $e';
         _isVideoLoading = false;

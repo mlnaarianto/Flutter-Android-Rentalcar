@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/menu/rentals_booking_page.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/menu/driver_bookings_page.dart';
@@ -33,11 +34,6 @@ class _SidebarState extends State<Sidebar> {
   // selama belum selesai fetch / fetch gagal -> _openAdminChat() akan
   // fallback ke '1' supaya menu tetap bisa dipakai walau endpoint ini
   // belum siap atau permission belum di-assign ke siapa pun.
-  //
-  // TODO: sesuaikan _apiBaseUrl ini dengan base URL API kamu yang
-  // sebenarnya (mis. ambil dari file config/env terpisah), ini cuma
-  // placeholder supaya kode tetap bisa langsung dipakai.
-  static const String _apiBaseUrl = 'https://api.rentalcar.test/api';
   String? _supportAgentId;
 
   // Tag unik untuk animasi Hero avatar sidebar -> fullscreen viewer
@@ -56,6 +52,8 @@ class _SidebarState extends State<Sidebar> {
 
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
     setState(() {
       _avatarUrl = prefs.getString('avatar_url');
       // SENGAJA tidak diberi fallback hardcode (mis. '3') di sini. Kalau
@@ -68,7 +66,7 @@ class _SidebarState extends State<Sidebar> {
 
     // Dipisah dari setState di atas karena butuh 'await' network call --
     // tidak masalah dipanggil setelah _userId di-set, keduanya independen.
-    await _loadSupportAgentId(prefs);
+    await _loadSupportAgentId();
   }
 
   /// ================= AMBIL ID ADMIN/CS SECARA DINAMIS =================
@@ -77,20 +75,17 @@ class _SidebarState extends State<Sidebar> {
   /// jadi kalau admin CS dipindah/diganti lewat Filament, aplikasi ini
   /// otomatis ikut tanpa perlu update kode atau rilis ulang.
   ///
+  /// Token dipasang dan di-refresh otomatis oleh ApiClient, jadi tidak
+  /// perlu membaca token dari prefs lagi di sini.
+  ///
   /// Kalau gagal (network error, 404 karena permission belum di-assign ke
   /// siapa pun, dsb), _supportAgentId dibiarkan null dan _openAdminChat()
   /// akan pakai fallback '1' -- supaya menu Chat Admin tidak ikut rusak
   /// hanya karena endpoint ini belum siap.
-  Future<void> _loadSupportAgentId(SharedPreferences prefs) async {
-    final token = prefs.getString('access_token') ?? '';
-
+  Future<void> _loadSupportAgentId() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_apiBaseUrl/support-agent'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
+      final response = await ApiClient.instance.get(
+        Uri.parse('${ApiConfig.baseUrl}/support-agent'),
       );
 
       if (response.statusCode != 200) return;
@@ -173,9 +168,6 @@ class _SidebarState extends State<Sidebar> {
 
     Navigator.pop(context);
 
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token') ?? '';
-
     if (!context.mounted) return;
 
     final String uniqueChatId =
@@ -193,7 +185,6 @@ class _SidebarState extends State<Sidebar> {
           // kalau fetch belum selesai / gagal -- lihat _loadSupportAgentId().
           receiverId: _supportAgentId ?? '1',
           receiverName: "Admin Rental (CS)",
-          authToken: token,
         ),
       ),
     );

@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/widgets/bottom.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/enums/app_enums.dart';
@@ -63,6 +63,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   // diam memakai ID '3' yang bisa jadi identitas user lain.
   Future<void> _loadUserRoleAndBookings() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
     setState(() {
       _currentUserId = prefs.getString('user_id');
       _currentUserName = prefs.getString('user_name') ?? AppRole.penyewa.value;
@@ -76,6 +78,9 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   // yang login itu Perental yang juga pernah nyewa mobil orang lain, cuma
   // riwayat sewanya sendiri yang muncul di sini — bukan booking untuk mobil
   // yang dia kelola.
+  //
+  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchBookings() async {
     setState(() {
       _isLoading = true;
@@ -83,29 +88,21 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) {
-        setState(() {
-          _errorMessage = 'Sesi habis. Silakan login kembali.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/bookings/my-history'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         setState(() {
           _bookings = decoded['data'] ?? [];
+          _isLoading = false;
+        });
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = 'Sesi habis. Silakan login kembali.';
           _isLoading = false;
         });
       } else {
@@ -116,6 +113,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Terjadi kesalahan koneksi: $e';
         _isLoading = false;
@@ -125,15 +123,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
   Future<void> _cancelBooking(int bookingId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.patch(
+      final response = await ApiClient.instance.patch(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/cancel'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
 
       if (response.statusCode == 200) {
@@ -166,15 +157,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   // TIDAK BISA mengubah status ini sendiri.
   Future<void> _checkQrisPaymentStatus(int bookingId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/check-payment'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
 
       final decoded = jsonDecode(response.body);
@@ -221,7 +205,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   // penyewa. Sekarang _currentUserId di-guard eksplisit di awal fungsi
   // (return + snackbar), dan ownerId tidak lagi punya fallback angka --
   // kalau tidak ditemukan, dianggap tidak valid dan navigasi dibatalkan.
-  void _openChatWithOwner(dynamic carData) async {
+  void _openChatWithOwner(dynamic carData) {
     if (carData == null) {
       _showSnackBar('Informasi kendaraan tidak tersedia.', Colors.red);
       return;
@@ -251,9 +235,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         ? ownerMap['avatar']?.toString()
         : null;
 
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token') ?? '';
-
     // PENTING: skema "room_rental_{ownerId}_user_{currentUserId}" ini harus
     // PERSIS SAMA dengan yang dipakai sisi Perental
     // (RentalsBookingPage._openChatWithRenter) untuk room yang sama.
@@ -271,7 +252,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           receiverId: ownerId,
           receiverName: "Perental: $ownerName",
           receiverAvatarUrl: ownerAvatar,
-          authToken: token,
         ),
       ),
     );

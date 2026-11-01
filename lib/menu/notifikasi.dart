@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/services/notification_socket_service.dart';
 
 class NotifikasiPage extends StatefulWidget {
@@ -80,6 +80,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   }
 
   /// ================= AMBIL DATA NOTIFIKASI =================
+  /// Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  /// benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchNotifications() async {
     setState(() {
       _isLoading = true;
@@ -87,29 +89,21 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) {
-        setState(() {
-          _errorMessage = 'Sesi habis. Silakan login kembali.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/notifications'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         setState(() {
           _notifications = decoded['data'] ?? [];
+          _isLoading = false;
+        });
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = 'Sesi habis. Silakan login kembali.';
           _isLoading = false;
         });
       } else {
@@ -120,6 +114,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Terjadi kesalahan koneksi ke server: $e';
         _isLoading = false;
@@ -130,20 +125,13 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   /// ================= TANDAI SUDAH DIBACA KE BACKEND =================
   Future<void> _markNotificationsAsRead({int attempt = 0}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) return;
-
-      final response = await http.post(
+      final response = await ApiClient.instance.post(
         Uri.parse('${ApiConfig.baseUrl}/notifications/read-all'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
 
       if (response.statusCode == 200) {
+        // prefs tetap dipakai di sini untuk flag non-sensitif (bukan token).
+        final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('has_unread_notifications', false);
 
         if (mounted) {
@@ -153,6 +141,10 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
             }
           });
         }
+      } else if (response.statusCode == 401) {
+        // Sesi sudah mati (refresh juga ditolak). onSessionExpired yang
+        // mengurus pindah ke login, jadi tidak perlu di-retry.
+        debugPrint('NotifikasiPage: read-all 401, sesi berakhir, tidak di-retry.');
       } else {
         debugPrint(
             'NotifikasiPage: read-all gagal (${response.statusCode}), attempt=$attempt');
@@ -188,19 +180,13 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.delete(
+      final response = await ApiClient.instance.delete(
         Uri.parse('${ApiConfig.baseUrl}/notifications/$notifId'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
 
       if (response.statusCode != 200) {
         // Jika gagal, kembalikan data ke dalam list
+        if (!mounted) return;
         setState(() {
           _notifications.insert(index, deletedNotif);
         });
@@ -208,6 +194,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
       }
     } catch (e) {
       // Jika error koneksi, kembalikan data ke dalam list
+      if (!mounted) return;
       setState(() {
         _notifications.insert(index, deletedNotif);
       });
@@ -239,22 +226,18 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     );
 
     if (confirm != true) return;
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.delete(
+      final response = await ApiClient.instance.delete(
         Uri.parse('${ApiConfig.baseUrl}/notifications'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         setState(() {
@@ -267,6 +250,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         _showSnackBar('Gagal menghapus notifikasi (Kode: ${response.statusCode})');
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
       _showSnackBar('Terjadi kesalahan koneksi.');
     }

@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/enums/app_enums.dart';
 
@@ -80,42 +80,38 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   // diam-diam memakai identitas user lain.
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
     setState(() {
       _currentUserId = prefs.getString('user_id');
       _currentUserName = prefs.getString('user_name') ?? AppRole.perental.value;
     });
   }
 
-  // 1. Ambil daftar booking khusus perental dari API backend
+  // 1. Ambil daftar booking khusus perental dari API backend.
+  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchBookings() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) {
-        setState(() {
-          _errorMessage = 'Sesi habis. Silakan login kembali.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/bookings'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         setState(() {
           _bookings = decoded['data'] ?? [];
+          _isLoading = false;
+        });
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = 'Sesi habis. Silakan login kembali.';
           _isLoading = false;
         });
       } else {
@@ -125,6 +121,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Terjadi kesalahan koneksi: $e';
         _isLoading = false;
@@ -135,15 +132,8 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   // 2. Ambil daftar user ber-role 'Driver' dari backend
   Future<List<dynamic>> _fetchAvailableDrivers() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/drivers-list'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
 
       if (response.statusCode == 200) {
@@ -252,16 +242,9 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   // 4. Kirim request API penugasan driver ke backend
   Future<void> _submitAssignDriver(int bookingId, int driverId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.patch(
+      final response = await ApiClient.instance.patch(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/assign-driver'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'driver_id': driverId}),
       );
 
@@ -287,16 +270,9 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   // 5. Kirim request API pembaruan status booking ke backend
   Future<void> _updateBookingStatus(int bookingId, String newStatus) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.patch(
+      final response = await ApiClient.instance.patch(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/status'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'status': newStatus}),
       );
 
@@ -326,15 +302,8 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     setState(() => _checkingPaymentIds.add(bookingId));
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/check-payment'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
 
       final decoded = jsonDecode(response.body);
@@ -385,16 +354,9 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     setState(() => _confirmingCashIds.add(bookingId));
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      final response = await http.patch(
+      final response = await ApiClient.instance.patch(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/status'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'payment_status': 'paid'}),
       );
 
@@ -428,7 +390,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
   // Di-guard: kalau _currentUserId belum ke-load, JANGAN buka ChatPage --
   // sebelumnya kode ini fallback diam-diam ke '3' dan bisa menghasilkan
   // uniqueChatId berisi literal "null" kalau _currentUserId null.
-  void _openChatWithRenter(Map<String, dynamic> renter) async {
+  void _openChatWithRenter(Map<String, dynamic> renter) {
     if (_currentUserId == null || _currentUserId!.isEmpty) {
       _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
       return;
@@ -442,9 +404,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       _showSnackBar('ID Penyewa tidak valid.', Colors.red);
       return;
     }
-
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token') ?? '';
 
     // PENTING: skema "room_rental_{perentalId}_user_{renterId}" ini harus
     // PERSIS SAMA dengan yang dipakai halaman chat milik Penyewa untuk room
@@ -466,7 +425,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
           receiverId: renterId,
           receiverName: "Penyewa: $renterName",
           receiverAvatarUrl: renterAvatar,
-          authToken: token,
         ),
       ),
     );
@@ -474,7 +432,7 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
 
   // Navigasi ke Halaman Chat Perental <-> Driver.
   // Guard yang sama seperti _openChatWithRenter di atas.
-  void _openChatWithDriver(Map<String, dynamic> driver) async {
+  void _openChatWithDriver(Map<String, dynamic> driver) {
     if (_currentUserId == null || _currentUserId!.isEmpty) {
       _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
       return;
@@ -488,9 +446,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       _showSnackBar('ID Driver tidak valid.', Colors.red);
       return;
     }
-
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token') ?? '';
 
     // Catatan skema chatId sama seperti di _openChatWithRenter -- pastikan
     // sisi Driver (kalau punya halaman chat sendiri ke Perental) memakai
@@ -509,7 +464,6 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
           receiverId: driverId,
           receiverName: "Driver: $driverName",
           receiverAvatarUrl: driverAvatar,
-          authToken: token,
         ),
       ),
     );

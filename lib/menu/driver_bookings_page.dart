@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/enums/app_enums.dart';
 
@@ -44,42 +44,39 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
   // eksplisit sebelum membuka ChatPage.
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
     setState(() {
       _currentUserId = prefs.getString('user_id') ?? '';
       _currentUserName = prefs.getString('user_name') ?? AppRole.driver.value;
     });
   }
 
-  // Ambil daftar tugas booking khusus untuk driver yang sedang login
+  // Ambil daftar tugas booking khusus untuk driver yang sedang login.
+  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  // benar-benar mati (refresh token ditolak), onSessionExpired di main.dart
+  // yang mengarahkan user ke LoginPage.
   Future<void> _fetchDriverBookings() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) {
-        setState(() {
-          _errorMessage = 'Sesi habis. Silakan login kembali.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/bookings'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         setState(() {
           _assignedBookings = decoded['data'] ?? [];
+          _isLoading = false;
+        });
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = 'Sesi habis. Silakan login kembali.';
           _isLoading = false;
         });
       } else {
@@ -90,6 +87,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Terjadi kesalahan koneksi: $e';
         _isLoading = false;
@@ -105,7 +103,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
   // Akibatnya uniqueChatId jadi berakhiran kosong ("..._driver_") dan,
   // yang lebih penting, ChatPage memakai currentUserId itu untuk menentukan
   // bubble chat mana yang "milik saya" -- kalau kosong, bisa salah tampil.
-  void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) async {
+  void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) {
     if (_currentUserId == null || _currentUserId!.isEmpty) {
       _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
       return;
@@ -119,9 +117,6 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
       _showSnackBar('ID Perental tidak valid.', Colors.red);
       return;
     }
-
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('access_token') ?? '';
 
     // Format unik room chat antara perental dan driver -- HARUS sama persis
     // dengan sisi Perental (RentalsBookingPage._openChatWithDriver):
@@ -141,7 +136,6 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
           receiverId: ownerId,
           receiverName: "Perental: $ownerName",
           receiverAvatarUrl: ownerAvatar,
-          authToken: token,
         ),
       ),
     );

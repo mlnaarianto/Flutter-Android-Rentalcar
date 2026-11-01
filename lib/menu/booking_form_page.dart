@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/menu/booking_history_page.dart'; // 👈 DITAMBAHKAN: dibutuhkan untuk redirect ke Riwayat Pemesanan
 
@@ -119,6 +118,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
     }
   }
 
+  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _submitBooking() async {
     if (_startDate == null || _endDate == null) {
       _showSnackBar('Silakan pilih tanggal mulai dan selesai sewa!', _accentColor);
@@ -128,22 +129,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('access_token');
-
-      if (token == null) {
-        _showSnackBar('Sesi habis. Silakan login kembali.', _dangerColor);
-        setState(() => _isSubmitting = false);
-        return;
-      }
-
-      final response = await http.post(
+      final response = await ApiClient.instance.post(
         Uri.parse('${ApiConfig.baseUrl}/bookings'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'car_id': widget.car['id'],
           'start_date': _formatDate(_startDate), // Menggunakan format bersih YYYY-MM-DD
@@ -153,6 +141,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
           'notes': _notesController.text,
         }),
       );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 401) {
+        _showSnackBar('Sesi habis. Silakan login kembali.', _dangerColor);
+        return;
+      }
 
       final decoded = jsonDecode(response.body);
 
@@ -167,25 +162,21 @@ class _BookingFormPageState extends State<BookingFormPage> {
         // balik lagi ke form/detail mobil yang sudah tidak relevan.
         _showSnackBar('Booking berhasil dibuat! Silakan cek riwayat pesanan.', _successColor);
 
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => const BookingHistoryPage()),
-            (route) => route.isFirst,
-          );
-        }
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const BookingHistoryPage()),
+          (route) => route.isFirst,
+        );
       } else if (response.statusCode == 403) {
         String message = decoded['message'] ?? 'Akses ditolak.';
 
         if (message.contains('Data Personal')) {
           _showSnackBar(message, _accentColor);
 
-          if (mounted) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const ProfilPage()),
-            );
-          }
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const ProfilPage()),
+          );
         } else {
           _showPendingWarningDialog(message);
         }
@@ -193,6 +184,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
         _showSnackBar(decoded['message'] ?? 'Gagal membuat booking', _dangerColor);
       }
     } catch (e) {
+      if (!mounted) return;
       _showSnackBar('Terjadi kesalahan koneksi: $e', _dangerColor);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -200,6 +192,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
