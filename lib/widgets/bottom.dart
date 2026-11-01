@@ -15,20 +15,12 @@ import 'package:rentalcar/services/notification_socket_service.dart'; // hapus t
 import 'package:rentalcar/services/api_client.dart'; // 🟢 FASE 4: POST /logout lewat ApiClient
 import 'package:rentalcar/services/token_storage.dart'; // 🟢 FASE 4: cek & hapus sesi
 import 'package:rentalcar/utils/navigation_service.dart'; // 🟢 FASE 4: navigatorKey global
+import 'package:rentalcar/utils/user_prefs.dart'; // 🟢 daftar key prefs bersama (userPrefsKeys)
 
-// 🟢 FASE 4: key prefs milik user yang dibersihkan saat logout.
-// Sama dengan _userPrefsKeys di main.dart. 'fcm_device_id' SENGAJA tidak
-// ikut dihapus karena itu identitas device, bukan data user.
-const List<String> _userPrefsKeys = [
-  'access_token', // jembatan sementara dari login.dart
-  'user_id',
-  'user_name',
-  'user_email',
-  'user_roles',
-  'role',
-  'user_permissions',
-  'avatar_url',
-];
+// 🟢 DIPINDAH: daftar key prefs milik user sekarang ada di
+// lib/utils/user_prefs.dart (userPrefsKeys), dipakai bersama dengan main.dart.
+// 'fcm_device_id' SENGAJA tidak ada di daftar itu karena itu identitas
+// device, bukan data user.
 
 class Bottom extends StatefulWidget {
   final int currentIndex;
@@ -131,7 +123,7 @@ class _BottomState extends State<Bottom> {
 
       try {
         final prefs = await SharedPreferences.getInstance();
-        for (final key in _userPrefsKeys) {
+        for (final key in userPrefsKeys) {
           await prefs.remove(key);
         }
       } catch (e) {

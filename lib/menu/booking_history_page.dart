@@ -32,6 +32,18 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     _loadUserRoleAndBookings();
   }
 
+  // 🟢 TAMBAHAN: decode JSON yang aman. Respons non-JSON (mis. 502 berisi
+  // HTML dari gateway) atau JSON yang bukan object tidak melempar
+  // FormatException, tapi mengembalikan null. Pemanggil yang menentukan
+  // pesan error yang ditampilkan ke user.
+  Map<String, dynamic>? _tryDecodeMap(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {}
+    return null;
+  }
+
   // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
   String _formatDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return '-';
@@ -95,9 +107,20 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
+        // 🟢 DIUBAH: decode aman. 200 tapi bukan JSON object dianggap error,
+        // bukan FormatException dan bukan daftar kosong yang menyesatkan.
+        final decoded = _tryDecodeMap(response.body);
+        if (decoded == null) {
+          setState(() {
+            _errorMessage = 'Respons server tidak valid. Coba lagi nanti.';
+            _isLoading = false;
+          });
+          return;
+        }
+
+        final data = decoded['data'];
         setState(() {
-          _bookings = decoded['data'] ?? [];
+          _bookings = data is List ? data : [];
           _isLoading = false;
         });
       } else if (response.statusCode == 401) {
@@ -136,10 +159,12 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         }
         _fetchBookings();
       } else {
-        final decoded = jsonDecode(response.body);
+        // 🟢 DIUBAH: decode aman, pesan fallback menyertakan kode status.
+        final decoded = _tryDecodeMap(response.body);
         if (mounted) {
           _showSnackBar(
-            decoded['message'] ?? 'Gagal membatalkan pesanan',
+            decoded?['message']?.toString() ??
+                'Gagal membatalkan pesanan (Kode: ${response.statusCode})',
             Colors.red,
           );
         }
@@ -161,9 +186,13 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/check-payment'),
       );
 
-      final decoded = jsonDecode(response.body);
+      // 🟢 DIUBAH: sebelumnya jsonDecode dipanggil SEBELUM cek status,
+      // jadi respons non-JSON (502 berisi HTML, dsb) melempar
+      // FormatException dan user melihat "Error: FormatException...".
+      // Sekarang decode aman; status dicek lebih dulu.
+      final decoded = _tryDecodeMap(response.body);
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && decoded != null) {
         final updatedBooking = decoded['data'];
         final newPaymentStatus = updatedBooking?['payment_status'] ?? 'unpaid';
 
@@ -178,7 +207,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       } else {
         if (mounted) {
           _showSnackBar(
-            decoded['message'] ?? 'Gagal mengecek status pembayaran',
+            decoded?['message']?.toString() ??
+                'Gagal mengecek status pembayaran (Kode: ${response.statusCode})',
             Colors.red,
           );
         }

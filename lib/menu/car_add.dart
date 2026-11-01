@@ -1,13 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums agar konsisten
+import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
 
 class CarAddPage extends StatefulWidget {
   final Map<String, dynamic>? carData; // Jika ada data, berarti mode Edit
@@ -116,6 +117,44 @@ class _CarAddPageState extends State<CarAddPage> {
     }
   }
 
+  /// 🟢 Membangun MultipartRequest baru. Dipanggil ulang oleh
+  /// ApiClient.sendMultipart saat retry setelah 401, karena request
+  /// multipart hanya bisa dikirim sekali (file dibaca ulang dari disk).
+  /// Header Authorization TIDAK diset di sini: ApiClient yang memasang.
+  Future<http.MultipartRequest> _buildRequest() async {
+    final String url = _isEditMode
+        ? '${ApiConfig.baseUrl}/cars/${widget.carData!['id']}'
+        : '${ApiConfig.baseUrl}/cars';
+
+    final request = http.MultipartRequest('POST', Uri.parse(url));
+
+    if (_isEditMode) {
+      request.fields['_method'] = 'PUT';
+    }
+
+    request.fields['name'] = _nameController.text.trim();
+    request.fields['brand'] = _brandController.text.trim();
+    request.fields['plate_number'] = _plateController.text.trim();
+    request.fields['engine_type'] = _engineType.trim();
+    request.fields['fuel_spec'] = _fuelSpecController.text.trim();
+    request.fields['seats'] = _seatsController.text.trim();
+    request.fields['year'] = _yearController.text.trim();
+    request.fields['price_per_day'] = _priceController.text.trim();
+    request.fields['driver_price_per_day'] =
+        _driverPriceController.text.trim();
+    request.fields['description'] = _descController.text.trim();
+    request.fields['video_url'] = _videoUrlController.text.trim();
+    request.fields['status'] = _status;
+
+    if (_imageFile != null) {
+      request.files.add(
+        await http.MultipartFile.fromPath('image', _imageFile!.path),
+      );
+    }
+
+    return request;
+  }
+
   Future<void> _submitCar() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -124,52 +163,15 @@ class _CarAddPageState extends State<CarAddPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
+      // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
+      final streamedResponse = await ApiClient.instance
+          .sendMultipart(_buildRequest)
+          .timeout(const Duration(seconds: 90));
+      final response = await http.Response.fromStream(streamedResponse);
 
-      if (token == null) {
-        _showSnackBar('Sesi habis. Silakan login kembali.', Colors.red);
-        setState(() => _isLoading = false);
-        return;
-      }
-
-      final String url = _isEditMode
-          ? '${ApiConfig.baseUrl}/cars/${widget.carData!['id']}'
-          : '${ApiConfig.baseUrl}/cars';
-
-      var request = http.MultipartRequest('POST', Uri.parse(url));
-
-      request.headers.addAll({
-        'Accept': 'application/json',
-        'Authorization': 'Bearer $token',
-      });
-
-      if (_isEditMode) {
-        request.fields['_method'] = 'PUT';
-      }
-
-      request.fields['name'] = _nameController.text.trim();
-      request.fields['brand'] = _brandController.text.trim();
-      request.fields['plate_number'] = _plateController.text.trim();
-      request.fields['engine_type'] = _engineType.trim();
-      request.fields['fuel_spec'] = _fuelSpecController.text.trim();
-      request.fields['seats'] = _seatsController.text.trim();
-      request.fields['year'] = _yearController.text.trim();
-      request.fields['price_per_day'] = _priceController.text.trim();
-      request.fields['driver_price_per_day'] =
-          _driverPriceController.text.trim();
-      request.fields['description'] = _descController.text.trim();
-      request.fields['video_url'] = _videoUrlController.text.trim();
-      request.fields['status'] = _status;
-
-      if (_imageFile != null) {
-        request.files.add(
-          await http.MultipartFile.fromPath('image', _imageFile!.path),
-        );
-      }
-
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
+      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
+      // halaman ini sudah tidak ada. Jangan lanjut pakai context.
+      if (!mounted) return;
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         _showSnackBar(
@@ -179,6 +181,13 @@ class _CarAddPageState extends State<CarAddPage> {
           const Color(0xFF16A34A),
         );
         Navigator.pop(context, true);
+      } else if (response.statusCode == 401) {
+        // Sampai sini berarti refresh gagal sementara (jaringan/server),
+        // bukan sesi mati (kalau sesi mati, sudah ke LoginPage).
+        _showSnackBar(
+          'Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.',
+          Colors.red,
+        );
       } else if (response.statusCode == 403) {
         String message =
             'Lengkapi Data Personal (No. HP & KTP) terlebih dahulu.';
@@ -191,12 +200,10 @@ class _CarAddPageState extends State<CarAddPage> {
 
         _showSnackBar(message, _accentColor);
 
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const ProfilPage()),
-          );
-        }
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ProfilPage()),
+        );
       } else {
         String errorMessage = 'Gagal menyimpan data. Periksa kembali inputan.';
         try {
@@ -208,6 +215,8 @@ class _CarAddPageState extends State<CarAddPage> {
 
         _showSnackBar(errorMessage, Colors.red);
       }
+    } on TimeoutException {
+      _showSnackBar('Upload terlalu lama. Coba lagi.', Colors.red);
     } catch (e) {
       _showSnackBar('Terjadi kesalahan koneksi: $e', Colors.red);
     } finally {
@@ -220,6 +229,7 @@ class _CarAddPageState extends State<CarAddPage> {
   }
 
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -499,11 +509,11 @@ class _CarAddPageState extends State<CarAddPage> {
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: _primaryColor, width: 1.4),
+                            borderSide: const BorderSide(
+                                color: _primaryColor, width: 1.4),
                           ),
-                          labelStyle:
-                              TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                          labelStyle: TextStyle(
+                              color: Colors.grey.shade600, fontSize: 13),
                         ),
                         items: _engineTypes
                             .map((type) => DropdownMenuItem(

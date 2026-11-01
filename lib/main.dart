@@ -10,6 +10,7 @@ import 'package:rentalcar/services/notification_socket_service.dart';
 import 'package:rentalcar/services/token_storage.dart'; // 🟢 TAMBAHAN
 import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
 import 'package:rentalcar/utils/navigation_service.dart'; // 👈 satu-satunya sumber navigatorKey
+import 'package:rentalcar/utils/user_prefs.dart'; // 🟢 TAMBAHAN: daftar key prefs bersama
 import 'firebase_options.dart';
 // 🟢 DIHAPUS: import app_notifier.dart tidak diperlukan di sini lagi.
 // scaffoldMessengerKey sudah tidak dipakai karena AppNotifier sekarang
@@ -81,18 +82,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
-// 🟢 TAMBAHAN: key prefs milik user yang dibersihkan saat sesi berakhir.
-// 'access_token' ikut dihapus (jembatan sementara dari login.dart).
-const List<String> _userPrefsKeys = [
-  'access_token',
-  'user_id',
-  'user_name',
-  'user_email',
-  'user_roles',
-  'role',
-  'user_permissions',
-  'avatar_url',
-];
+// 🟢 DIPINDAH: daftar key prefs milik user sekarang ada di
+// lib/utils/user_prefs.dart (userPrefsKeys), dipakai bersama dengan
+// bottom.dart supaya hanya ada satu sumber.
 
 // 🟢 TAMBAHAN: guard supaya callback tidak jalan dua kali kalau ada
 // beberapa request yang sama-sama kena sesi mati.
@@ -116,7 +108,7 @@ Future<void> _handleSessionExpired() async {
     await TokenStorage.clear();
 
     final prefs = await SharedPreferences.getInstance();
-    for (final key in _userPrefsKeys) {
+    for (final key in userPrefsKeys) {
       await prefs.remove(key);
     }
 
@@ -178,19 +170,12 @@ void main() async {
   // sudah kedaluwarsa; ApiClient yang akan me-refresh saat dipakai.
   final bool hasSession = await TokenStorage.hasSession();
 
-  // 🟢 MIGRASI: user lama punya 'access_token' di prefs tapi tidak punya
-  // refresh token -> hasSession false -> otomatis ke LoginPage. Bersihkan
-  // token lama itu. Kalau hasSession true, JANGAN dihapus dulu: masih
-  // dipakai jembatan sementara untuk halaman yang belum dimigrasi.
-  // TODO(refresh-token): hapus pengecekan ini + jembatan di login.dart
-  // setelah Fase 5 selesai, ganti dengan prefs.remove('access_token')
-  // tanpa syarat.
-  if (!hasSession) {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.containsKey('access_token')) {
-      await prefs.remove('access_token');
-    }
-  }
+  // 🟢 MIGRASI: user lama punya 'access_token' di prefs (sebelum token
+  // dipindah ke secure storage). Buang tanpa syarat, karena tidak ada lagi
+  // kode yang membacanya. User lama tanpa refresh token otomatis ke
+  // LoginPage lewat hasSession == false.
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove('access_token');
 
   // 3. Tentukan halaman awal berdasarkan status sesi
   final Widget initialScreen =

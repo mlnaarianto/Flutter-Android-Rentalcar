@@ -85,7 +85,7 @@ class _SidebarState extends State<Sidebar> {
   Future<void> _loadSupportAgentId() async {
     try {
       final response = await ApiClient.instance.get(
-        Uri.parse('${ApiConfig.baseUrl}/support-agent'),
+        Uri.parse(ApiConfig.supportAgent), // 🟢 DIUBAH: sebelumnya '${ApiConfig.baseUrl}/support-agent'
       );
 
       if (response.statusCode != 200) return;

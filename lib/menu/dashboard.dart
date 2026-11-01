@@ -51,10 +51,14 @@ class _DashboardState extends State<Dashboard> {
   /// Mengambil data nama, role, dan user_id dari SharedPreferences
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
+      // 🟢 DIPERBAIKI: sebelumnya membaca key 'email', padahal login.dart
+      // menyimpan email dengan key 'user_email'. Akibatnya fallback nama
+      // (bagian sebelum '@') tidak pernah terpakai.
       _userName =
           prefs.getString('user_name') ??
-          prefs.getString('email')?.split('@')[0] ??
+          prefs.getString('user_email')?.split('@')[0] ??
           'Pengguna';
       _userRole = prefs.getString('role') ?? AppRole.penyewa.value;
 

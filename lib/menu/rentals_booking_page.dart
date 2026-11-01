@@ -50,6 +50,18 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
     _fetchBookings();
   }
 
+  // 🟢 TAMBAHAN: decode JSON yang aman. Respons non-JSON (mis. 502 berisi
+  // HTML dari gateway) atau JSON yang bukan object tidak melempar
+  // FormatException, tapi mengembalikan null. Pemanggil yang menentukan
+  // pesan error yang ditampilkan ke user.
+  Map<String, dynamic>? _tryDecodeMap(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {}
+    return null;
+  }
+
   // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
   String _formatDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return '-';
@@ -104,9 +116,20 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
+        // 🟢 DIUBAH: decode aman. 200 tapi bukan JSON object dianggap error,
+        // bukan FormatException dan bukan daftar kosong yang menyesatkan.
+        final decoded = _tryDecodeMap(response.body);
+        if (decoded == null) {
+          setState(() {
+            _errorMessage = 'Respons server tidak valid. Coba lagi nanti.';
+            _isLoading = false;
+          });
+          return;
+        }
+
+        final data = decoded['data'];
         setState(() {
-          _bookings = decoded['data'] ?? [];
+          _bookings = data is List ? data : [];
           _isLoading = false;
         });
       } else if (response.statusCode == 401) {
@@ -137,8 +160,9 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       );
 
       if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return decoded['data'] ?? [];
+        final decoded = _tryDecodeMap(response.body);
+        final data = decoded?['data'];
+        return data is List ? data : [];
       }
       return [];
     } catch (e) {
@@ -248,7 +272,8 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         body: jsonEncode({'driver_id': driverId}),
       );
 
-      final decoded = jsonDecode(response.body);
+      // 🟢 DIUBAH: decode aman (sebelumnya jsonDecode sebelum cek status).
+      final decoded = _tryDecodeMap(response.body);
 
       if (response.statusCode == 200) {
         if (mounted) {
@@ -257,7 +282,11 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         _fetchBookings();
       } else {
         if (mounted) {
-          _showSnackBar(decoded['message'] ?? 'Gagal menugaskan driver', Colors.red);
+          _showSnackBar(
+            decoded?['message']?.toString() ??
+                'Gagal menugaskan driver (Kode: ${response.statusCode})',
+            Colors.red,
+          );
         }
       }
     } catch (e) {
@@ -276,7 +305,8 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         body: jsonEncode({'status': newStatus}),
       );
 
-      final decoded = jsonDecode(response.body);
+      // 🟢 DIUBAH: decode aman (sebelumnya jsonDecode sebelum cek status).
+      final decoded = _tryDecodeMap(response.body);
 
       if (response.statusCode == 200) {
         if (mounted) {
@@ -285,7 +315,11 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         _fetchBookings();
       } else {
         if (mounted) {
-          _showSnackBar(decoded['message'] ?? 'Gagal memperbarui status', Colors.red);
+          _showSnackBar(
+            decoded?['message']?.toString() ??
+                'Gagal memperbarui status (Kode: ${response.statusCode})',
+            Colors.red,
+          );
         }
       }
     } catch (e) {
@@ -306,9 +340,10 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/check-payment'),
       );
 
-      final decoded = jsonDecode(response.body);
+      // 🟢 DIUBAH: decode aman (sebelumnya jsonDecode sebelum cek status).
+      final decoded = _tryDecodeMap(response.body);
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && decoded != null) {
         final updatedBooking = decoded['data'];
         final newPaymentStatus = updatedBooking?['payment_status'] ?? 'unpaid';
 
@@ -323,7 +358,11 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         _fetchBookings(); // Refresh daftar biar badge status ikut update
       } else {
         if (mounted) {
-          _showSnackBar(decoded['message'] ?? 'Gagal mengecek status pembayaran', Colors.red);
+          _showSnackBar(
+            decoded?['message']?.toString() ??
+                'Gagal mengecek status pembayaran (Kode: ${response.statusCode})',
+            Colors.red,
+          );
         }
       }
     } catch (e) {
@@ -360,7 +399,8 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
         body: jsonEncode({'payment_status': 'paid'}),
       );
 
-      final decoded = jsonDecode(response.body);
+      // 🟢 DIUBAH: decode aman (sebelumnya jsonDecode sebelum cek status).
+      final decoded = _tryDecodeMap(response.body);
 
       if (response.statusCode == 200) {
         if (mounted) {
@@ -370,7 +410,8 @@ class _RentalsBookingPageState extends State<RentalsBookingPage> {
       } else {
         if (mounted) {
           _showSnackBar(
-            decoded['message'] ?? 'Gagal mengonfirmasi pembayaran tunai',
+            decoded?['message']?.toString() ??
+                'Gagal mengonfirmasi pembayaran tunai (Kode: ${response.statusCode})',
             Colors.red,
           );
         }

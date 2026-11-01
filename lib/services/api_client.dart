@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'; // DEBUG-LOG: untuk debugPrint
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
@@ -12,6 +13,10 @@ enum _RefreshResult { success, sessionExpired, temporaryFailure }
 /// (proaktif dan saat 401), dan memastikan hanya satu refresh berjalan.
 ///
 /// Pemakaian: ApiClient.instance.get(Uri.parse(...))
+/// Untuk upload multipart: ApiClient.instance.sendMultipart(() async { ... })
+///
+/// Semua baris bertanda "DEBUG-LOG" bersifat sementara dan tidak mencetak
+/// nilai token (hanya panjang, nama key, status). Hapus setelah bug beres.
 class ApiClient extends http.BaseClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
@@ -36,9 +41,15 @@ class ApiClient extends http.BaseClient {
 
     // Refresh proaktif. Kalau gagal sementara, tetap kirim dengan token lama.
     final expiresAt = await TokenStorage.readExpiresAt();
+    // DEBUG-LOG
+    debugPrint('SEND ${request.method} ${request.url.path} '
+        'expiresAt=$expiresAt now=${DateTime.now()}');
+
     if (expiresAt != null &&
         DateTime.now().isAfter(expiresAt.subtract(_refreshMargin))) {
-      await _refreshOnce();
+      debugPrint('SEND proaktif refresh dipicu'); // DEBUG-LOG
+      final r = await _refreshOnce();
+      debugPrint('SEND proaktif refresh hasil=$r'); // DEBUG-LOG
     }
 
     // Salin dulu: request hanya bisa dikirim sekali, dan kita butuh
@@ -46,21 +57,60 @@ class ApiClient extends http.BaseClient {
     final retryCopy = _copyIfRetryable(request);
 
     final response = await _sendWithAuth(request);
+    // DEBUG-LOG
+    debugPrint('RESP ${request.url.path} status=${response.statusCode} '
+        'retryable=${retryCopy != null}');
+
     if (response.statusCode != 401 || retryCopy == null) {
       return response; // bukan 401, atau multipart/streamed (tidak bisa diulang)
     }
 
+    debugPrint('RESP 401 -> coba refresh lalu retry'); // DEBUG-LOG
     final result = await _refreshOnce();
+    debugPrint('RESP 401 refresh hasil=$result'); // DEBUG-LOG
     if (result != _RefreshResult.success) {
       return response; // kembalikan 401 asli, jangan logout dari sini
     }
 
     await response.stream.drain<void>(); // buang body 401 sebelumnya
-    return _sendWithAuth(retryCopy);
+    final retried = await _sendWithAuth(retryCopy);
+    // DEBUG-LOG
+    debugPrint('RETRY ${request.url.path} status=${retried.statusCode}');
+    return retried;
+  }
+
+  /// Kirim request multipart dengan retry setelah 401.
+  ///
+  /// [build] dipanggil ulang saat retry karena MultipartRequest hanya bisa
+  /// dikirim sekali (file harus dibaca ulang dari disk). Pemanggil TIDAK
+  /// perlu memasang header Authorization; ApiClient yang memasangnya.
+  ///
+  /// Alur: kirim -> kalau 401, refresh sekali (dibagi dengan request lain
+  /// yang sedang refresh) -> bangun ulang request -> kirim lagi.
+  /// Kalau refresh gagal, 401 pertama dikembalikan apa adanya (kalau sesi
+  /// mati, onSessionExpired sudah dipanggil oleh _doRefresh).
+  Future<http.StreamedResponse> sendMultipart(
+    Future<http.MultipartRequest> Function() build,
+  ) async {
+    // Percobaan 1 (send() sudah melakukan refresh proaktif)
+    final first = await send(await build());
+    if (first.statusCode != 401) return first;
+
+    // 401: refresh sekali, lalu bangun ulang request dan kirim lagi
+    debugPrint('MULTIPART 401 -> refresh lalu kirim ulang'); // DEBUG-LOG
+    final result = await _refreshOnce();
+    if (result != _RefreshResult.success) return first;
+
+    await first.stream.drain<void>(); // buang body 401 sebelumnya
+    return send(await build());
   }
 
   Future<http.StreamedResponse> _sendWithAuth(http.BaseRequest request) async {
     final token = await TokenStorage.readAccess();
+    // DEBUG-LOG: hanya panjang token, bukan nilainya
+    debugPrint('AUTH ${request.url.path} accessToken='
+        '${token == null ? "NULL" : "len=${token.length}"}');
+
     request.headers['Accept'] = 'application/json';
     if (token != null && token.isNotEmpty) {
       request.headers['Authorization'] = 'Bearer $token';
@@ -77,6 +127,10 @@ class ApiClient extends http.BaseClient {
 
   Future<_RefreshResult> _doRefresh() async {
     final refreshToken = await TokenStorage.readRefresh();
+    // DEBUG-LOG
+    debugPrint('REFRESH start: refreshToken='
+        '${refreshToken == null ? "NULL" : "len=${refreshToken.length}"}');
+
     if (refreshToken == null || refreshToken.isEmpty) {
       // Tidak ada sesi (mis. sudah logout). Tidak perlu memicu callback lagi.
       return _RefreshResult.sessionExpired;
@@ -91,24 +145,37 @@ class ApiClient extends http.BaseClient {
         },
       ).timeout(_refreshTimeout);
 
+      // DEBUG-LOG
+      debugPrint('REFRESH url=${ApiConfig.refresh} status=${res.statusCode}');
+
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
+        // DEBUG-LOG: hanya nama key, bukan nilai
+        debugPrint('REFRESH keys=${data.keys.toList()}');
+
         await TokenStorage.save(
           accessToken: data['access_token'] as String,
           refreshToken: data['refresh_token'] as String,
           expiresIn: (data['expires_in'] as num).toInt(),
         );
+        debugPrint('REFRESH saved OK'); // DEBUG-LOG
         return _RefreshResult.success;
       }
 
       if (res.statusCode == 401) {
+        debugPrint('REFRESH 401 -> sesi berakhir'); // DEBUG-LOG
         await onSessionExpired?.call();
         return _RefreshResult.sessionExpired;
       }
 
+      // DEBUG-LOG: body error (bukan 200) tidak berisi token, aman dicetak
+      final b = res.body;
+      debugPrint('REFRESH non-200 body='
+          '${b.length > 300 ? b.substring(0, 300) : b}');
       return _RefreshResult.temporaryFailure; // 5xx dll: jangan logout
-    } catch (_) {
+    } catch (e, st) {
       // Jaringan putus, timeout, respons rusak: jangan logout.
+      debugPrint('REFRESH exception: $e\n$st'); // DEBUG-LOG
       return _RefreshResult.temporaryFailure;
     }
   }

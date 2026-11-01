@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -9,6 +10,7 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart';
+import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
 
 class ProfilPage extends StatefulWidget {
   const ProfilPage({super.key});
@@ -57,6 +59,19 @@ class _ProfilPageState extends State<ProfilPage> {
     _fetchUserData();
   }
 
+  @override
+  void dispose() {
+    _namaController.dispose();
+    _emailController.dispose();
+    _tglLahirController.dispose();
+    _hpController.dispose();
+    _addressController.dispose();
+    _simNumberController.dispose();
+    _simTypeController.dispose();
+    _simExpiredController.dispose();
+    super.dispose();
+  }
+
   /// ================= FIX FOTO GOOGLE BURAM/PIXELATED =================
   /// Google Sign-In mengembalikan URL foto profil dengan parameter ukuran
   /// bawaan yang kecil, biasanya diakhiri "=s96-c" (96x96 px, thumbnail).
@@ -83,20 +98,14 @@ class _ProfilPageState extends State<ProfilPage> {
   /// ================= FETCH DATA DARI LARAVEL API =================
   Future<void> _fetchUserData() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('access_token');
+      // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
+      final response = await ApiClient.instance
+          .get(Uri.parse(ApiConfig.userProfile))
+          .timeout(const Duration(seconds: 20));
 
-      if (token == null) {
-        throw Exception("Token tidak ditemukan, silakan login ulang.");
-      }
-
-      final response = await http.get(
-        Uri.parse(ApiConfig.userProfile),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
-      );
+      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
+      // halaman ini sudah tidak ada.
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> responseData = jsonDecode(response.body);
@@ -104,10 +113,14 @@ class _ProfilPageState extends State<ProfilPage> {
 
         final personalData = userData['personal_data'] ?? {};
 
+        // Prefs tetap dipakai untuk data user non-sensitif (avatar_url).
         final String? fetchedAvatar = userData['avatar'];
         if (fetchedAvatar != null && fetchedAvatar.isNotEmpty) {
+          final prefs = await SharedPreferences.getInstance();
           await prefs.setString('avatar_url', fetchedAvatar);
         }
+
+        if (!mounted) return;
 
         // Fungsi helper untuk membersihkan format tanggal ISO (misal: 2000-01-01T00:00:00.000000Z -> 2000-01-01)
         String formatDate(String? dateStr) {
@@ -145,16 +158,20 @@ class _ProfilPageState extends State<ProfilPage> {
           avatarUrl = fetchedAvatar;
           _isLoading = false;
         });
+      } else if (response.statusCode == 401) {
+        // Sampai sini berarti refresh gagal sementara (jaringan/server),
+        // bukan sesi mati (kalau sesi mati, sudah ke LoginPage).
+        throw Exception(
+            "Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.");
       } else {
         throw Exception("Gagal mengambil data profil (${response.statusCode})");
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))),
+      );
     }
   }
 
@@ -289,6 +306,45 @@ class _ProfilPageState extends State<ProfilPage> {
     return responseData['message'] ?? "Gagal menyimpan profil ($statusCode)";
   }
 
+  /// 🟢 Membangun MultipartRequest baru. Dipanggil ulang oleh
+  /// ApiClient.sendMultipart saat retry setelah 401, karena request
+  /// multipart hanya bisa dikirim sekali (file dibaca ulang dari disk).
+  /// Header Authorization TIDAK diset di sini: ApiClient yang memasang.
+  Future<http.MultipartRequest> _buildSaveRequest() async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse(ApiConfig.userProfile),
+    );
+
+    request.fields['_method'] = 'PATCH';
+
+    // Data Personal Umum
+    // 🟢 UBAH: pakai nomor lengkap format internasional (+62..., +60..., dst)
+    // yang dihasilkan IntlPhoneField, bukan _hpController.text mentah lagi.
+    request.fields['phone'] = _completePhoneNumber;
+    request.fields['birth_date'] = _tglLahirController.text;
+    request.fields['address'] = _addressController.text;
+
+    // Data SIM
+    request.fields['sim_number'] = _simNumberController.text;
+    request.fields['sim_type'] = _simTypeController.text;
+    request.fields['sim_expired_date'] = _simExpiredController.text;
+
+    if (ktpImage != null) {
+      request.files.add(
+        await http.MultipartFile.fromPath('ktp', ktpImage!.path),
+      );
+    }
+
+    if (simImage != null) {
+      request.files.add(
+        await http.MultipartFile.fromPath('sim_image', simImage!.path),
+      );
+    }
+
+    return request;
+  }
+
   /// ================= SAVE =================
   Future<void> _saveProfile() async {
     if (_formKey.currentState!.validate()) {
@@ -309,49 +365,15 @@ class _ProfilPageState extends State<ProfilPage> {
       setState(() => _isSaving = true);
 
       try {
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        String? token = prefs.getString('access_token');
-
-        if (token == null) {
-          throw Exception("Token tidak ditemukan, silakan login ulang.");
-        }
-
-        final request = http.MultipartRequest(
-          'POST',
-          Uri.parse(ApiConfig.userProfile),
-        );
-
-        request.headers['Authorization'] = 'Bearer $token';
-        request.headers['Accept'] = 'application/json';
-
-        request.fields['_method'] = 'PATCH';
-
-        // Data Personal Umum
-        // 🟢 UBAH: pakai nomor lengkap format internasional (+62..., +60..., dst)
-        // yang dihasilkan IntlPhoneField, bukan _hpController.text mentah lagi.
-        request.fields['phone'] = _completePhoneNumber;
-        request.fields['birth_date'] = _tglLahirController.text;
-        request.fields['address'] = _addressController.text;
-
-        // Data SIM
-        request.fields['sim_number'] = _simNumberController.text;
-        request.fields['sim_type'] = _simTypeController.text;
-        request.fields['sim_expired_date'] = _simExpiredController.text;
-
-        if (ktpImage != null) {
-          request.files.add(
-            await http.MultipartFile.fromPath('ktp', ktpImage!.path),
-          );
-        }
-
-        if (simImage != null) {
-          request.files.add(
-            await http.MultipartFile.fromPath('sim_image', simImage!.path),
-          );
-        }
-
-        final streamedResponse = await request.send();
+        // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
+        final streamedResponse = await ApiClient.instance
+            .sendMultipart(_buildSaveRequest)
+            .timeout(const Duration(seconds: 90));
         final response = await http.Response.fromStream(streamedResponse);
+
+        // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
+        // halaman ini sudah tidak ada. Jangan lanjut pakai context.
+        if (!mounted) return;
 
         // 🟢 TAMBAHAN: decode body-nya dulu supaya bisa baca 'errors' dari Laravel,
         // baik untuk kasus sukses (200) maupun gagal (422/500/dll).
@@ -364,12 +386,14 @@ class _ProfilPageState extends State<ProfilPage> {
         }
 
         if (response.statusCode == 200) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Data personal & SIM berhasil disimpan")),
-            );
-            Navigator.pop(context, true);
-          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Data personal & SIM berhasil disimpan")),
+          );
+          Navigator.pop(context, true);
+        } else if (response.statusCode == 401) {
+          // Refresh gagal sementara (jaringan/server), bukan sesi mati.
+          throw Exception(
+              "Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.");
         } else if (response.statusCode == 422) {
           // 🟢 TAMBAHAN: Error validasi (nomor HP/SIM sudah dipakai, format salah, dll)
           // Ambil pesan asli dari backend, bukan pesan generic.
@@ -379,23 +403,28 @@ class _ProfilPageState extends State<ProfilPage> {
           final String message = responseData['message'] ?? "Gagal menyimpan profil (${response.statusCode})";
           throw Exception(message);
         }
+      } on TimeoutException {
+        _showErrorSnackBar("Upload terlalu lama. Coba lagi.");
       } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(e.toString().replaceAll('Exception: ', '')),
-              backgroundColor: _dangerColor,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              margin: const EdgeInsets.all(12),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
+        _showErrorSnackBar(e.toString().replaceAll('Exception: ', ''));
       } finally {
         if (mounted) setState(() => _isSaving = false);
       }
     }
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: _dangerColor,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   /// ================= BOTTOM NAVIGATION =================

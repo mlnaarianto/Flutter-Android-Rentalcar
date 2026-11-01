@@ -11,6 +11,10 @@ class ApiConfig {
   static const String refresh = '$baseUrl/auth/refresh';
 
   static const String userProfile = '$baseUrl/user';
+
+  // 🟢 TAMBAHAN: ID admin/CS yang menerima chat bantuan (dipakai sidebar.dart)
+  static const String supportAgent = '$baseUrl/support-agent';
+
   // Nanti kalau ada endpoint lain, tinggal tambah di sini:
   // static const String getCars = '$baseUrl/cars';
   // static const String bookCar = '$baseUrl/book';

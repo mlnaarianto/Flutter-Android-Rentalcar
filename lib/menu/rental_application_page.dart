@@ -1,12 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:rentalcar/menu/profil.dart'; // 🟢 TAMBAHAN: untuk redirect ke halaman Profil
+import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
 
 class RentalApplicationPage extends StatefulWidget {
   const RentalApplicationPage({super.key});
@@ -56,18 +56,14 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
   /// Ambil status pengajuan dari backend Laravel
   Future<void> _fetchApplicationStatus() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
+      // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
+      final response = await ApiClient.instance
+          .get(Uri.parse('${ApiConfig.baseUrl}/rental-application'))
+          .timeout(const Duration(seconds: 20));
 
-      if (token == null) return;
-
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/rental-application'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
-      );
+      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
+      // halaman ini sudah tidak ada.
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -105,16 +101,12 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
+      final response = await ApiClient.instance
+          .get(Uri.parse(
+              '${ApiConfig.baseUrl}/rental-application/reverse-geocode?latitude=$lat&longitude=$lng'))
+          .timeout(const Duration(seconds: 20));
 
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/rental-application/reverse-geocode?latitude=$lat&longitude=$lng'),
-        headers: {
-          if (token != null) 'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-        },
-      );
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -184,53 +176,65 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
+      // 🟢 Token & refresh diurus ApiClient. POST JSON biasa (bukan multipart),
+      // jadi otomatis di-retry sekali kalau kena 401.
+      final response = await ApiClient.instance
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/rental-application'),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'business_name': _businessNameController.text,
+              'business_address': _businessAddressController.text,
+              'latitude': _latitude,
+              'longitude': _longitude,
+              'formatted_address': _businessAddressController.text,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/rental-application'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'business_name': _businessNameController.text,
-          'business_address': _businessAddressController.text,
-          'latitude': _latitude,
-          'longitude': _longitude,
-          'formatted_address': _businessAddressController.text,
-        }),
-      );
+      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
+      // halaman ini sudah tidak ada. Jangan lanjut pakai context.
+      if (!mounted) return;
 
-      final responseData = jsonDecode(response.body);
+      // Decode aman: respons non-JSON tidak melempar FormatException.
+      Map<String, dynamic> responseData = {};
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) responseData = decoded;
+      } catch (_) {}
 
       if (response.statusCode == 200) {
-        if (mounted) {
-          _showSnackBar('Pengajuan perental berhasil dikirim!', _successColor);
-        }
+        _showSnackBar('Pengajuan perental berhasil dikirim!', _successColor);
         _fetchApplicationStatus(); // Refresh status
+      } else if (response.statusCode == 401) {
+        // Sampai sini berarti refresh gagal sementara (jaringan/server),
+        // bukan sesi mati (kalau sesi mati, sudah ke LoginPage).
+        throw Exception(
+            'Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.');
       } else {
         // 🟢 TAMBAHAN: Cek apakah error-nya spesifik "data personal belum lengkap"
         // (dikirim backend dengan key 'personal_data' di dalam 'errors').
         // Kalau iya, arahkan user langsung ke halaman Profil untuk melengkapi
         // data (phone, KTP, SIM) alih-alih cuma menampilkan snackbar biasa.
         final errors = responseData['errors'];
-        if (errors != null && errors['personal_data'] != null) {
-          final String message = errors['personal_data'][0];
+        if (errors is Map && errors['personal_data'] != null) {
+          final dynamic raw = errors['personal_data'];
+          final String message = raw is List && raw.isNotEmpty
+              ? raw.first.toString()
+              : raw.toString();
+
+          _showSnackBar(message, _dangerColor);
+
+          // Jeda sebentar biar snackbar sempat terbaca sebelum pindah halaman
+          await Future.delayed(const Duration(milliseconds: 800));
 
           if (mounted) {
-            _showSnackBar(message, _dangerColor);
-
-            // Jeda sebentar biar snackbar sempat terbaca sebelum pindah halaman
-            await Future.delayed(const Duration(milliseconds: 800));
-
-            if (mounted) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ProfilPage()),
-              );
-            }
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ProfilPage()),
+            );
           }
           return; // Hentikan di sini, jangan lanjut ke throw Exception generic
         }
@@ -238,10 +242,10 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
         String errorMessage = responseData['message'] ?? 'Gagal mengirim pengajuan';
         throw Exception(errorMessage);
       }
+    } on TimeoutException {
+      _showSnackBar('Server tidak merespons. Coba lagi.', _dangerColor);
     } catch (e) {
-      if (mounted) {
-        _showSnackBar(e.toString().replaceAll('Exception: ', ''), _dangerColor);
-      }
+      _showSnackBar(e.toString().replaceAll('Exception: ', ''), _dangerColor);
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -250,6 +254,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
   }
 
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),

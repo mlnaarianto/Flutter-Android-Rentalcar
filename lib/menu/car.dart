@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/layouts/app.dart'; // Pastikan path ini benar sesuai diskusi sebelumnya
 import 'package:rentalcar/menu/car_add.dart';
 import 'package:rentalcar/menu/car_detail_page.dart';
@@ -58,6 +58,8 @@ class _CarPageState extends State<CarPage> {
   bool get _canManageCars => _userRole != AppRole.penyewa.value && _userRole != AppRole.driver.value;
   bool get _isSuperAdmin => _userRole == 'Super Admin'; 
 
+  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
+  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchCars() async {
     setState(() {
       _isLoading = true;
@@ -65,24 +67,11 @@ class _CarPageState extends State<CarPage> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
-
-      if (token == null) {
-        setState(() {
-          _errorMessage = 'Sesi habis atau token tidak ditemukan. Silakan login kembali.';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/cars'),
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final decodedData = jsonDecode(response.body);
@@ -92,6 +81,11 @@ class _CarPageState extends State<CarPage> {
           _applyFilters();
           _isLoading = false;
         });
+      } else if (response.statusCode == 401) {
+        setState(() {
+          _errorMessage = 'Sesi habis. Silakan login kembali.';
+          _isLoading = false;
+        });
       } else {
         setState(() {
           _errorMessage = 'Gagal memuat data mobil (Kode: ${response.statusCode})';
@@ -99,6 +93,7 @@ class _CarPageState extends State<CarPage> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Terjadi kesalahan koneksi ke server: $e';
         _isLoading = false;
@@ -180,24 +175,21 @@ class _CarPageState extends State<CarPage> {
 
   Future<void> _deleteCar(int carId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? token = prefs.getString('access_token');
-      if (token == null) return;
-
-      final response = await http.delete(
+      final response = await ApiClient.instance.delete(
         Uri.parse('${ApiConfig.baseUrl}/cars/$carId'),
-        headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
       );
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         setState(() {
           _cars.removeWhere((car) => car['id'] == carId);
           _applyFilters();
         });
-        if (!mounted) return;
         _showSnackBar('Mobil berhasil dihapus', const Color(0xFF16A34A));
+      } else if (response.statusCode == 401) {
+        _showSnackBar('Sesi habis. Silakan login kembali.', Colors.red);
       } else {
-        if (!mounted) return;
         _showSnackBar('Gagal menghapus mobil', Colors.red);
       }
     } catch (e) {

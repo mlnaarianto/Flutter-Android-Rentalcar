@@ -88,7 +88,13 @@ class _LoginPageState extends State<LoginPage> {
 
       debugPrint('Status code: ${response.statusCode}');
 
-      final data = jsonDecode(response.body);
+      // Decode aman: respons non-JSON (mis. 502 berisi HTML) tidak
+      // melempar FormatException, tapi jatuh ke pesan generik di bawah.
+      Map<String, dynamic> data = {};
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) data = decoded;
+      } catch (_) {}
 
       if (response.statusCode == 200 && data['status'] == 'success') {
         final String? accessToken = data['access_token'] as String?;
@@ -107,13 +113,10 @@ class _LoginPageState extends State<LoginPage> {
           expiresIn: expiresIn.toInt(),
         );
 
-        // Data user non-sensitif tetap di SharedPreferences
+        // Data user non-sensitif tetap di SharedPreferences.
+        // Token TIDAK disimpan di sini: semua halaman sudah memakai
+        // ApiClient yang membaca token dari TokenStorage.
         final prefs = await SharedPreferences.getInstance();
-
-        // TODO(refresh-token): JEMBATAN SEMENTARA. Halaman lain masih membaca
-        // prefs 'access_token' sampai Fase 5 selesai. HAPUS baris ini setelah
-        // semua halaman dimigrasi ke ApiClient.
-        await prefs.setString('access_token', accessToken);
 
         if (userData != null) {
           if (userData['id'] != null) {
