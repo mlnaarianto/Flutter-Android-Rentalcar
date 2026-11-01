@@ -287,11 +287,24 @@ class NotificationSocketService {
 
   bool _isConnecting = false;
 
+  /// 🟢 FIX race: guard dipasang SINKRON di awal, sebelum ada `await`.
+  /// Sebelumnya guard baru di-set setelah beberapa await (prefs, hasSession),
+  /// jadi dua pemanggil hampir bersamaan (main.dart + Dashboard.initState)
+  /// sama-sama lolos dan membuka DUA WebSocket.
   Future<void> connect() async {
     if (_isConnecting) {
       debugPrint('Reverb Service: sedang proses connect, skip panggilan dobel.');
       return;
     }
+    _isConnecting = true;
+    try {
+      await _connectInternal();
+    } finally {
+      _isConnecting = false;
+    }
+  }
+
+  Future<void> _connectInternal() async {
 
     // 🟢 FASE 3: cek sesi lewat TokenStorage (refresh token), bukan
     // access_token di prefs. Access token boleh sudah kedaluwarsa;
@@ -320,8 +333,6 @@ class NotificationSocketService {
           'Reverb Service: socket masih terbuka & menunggu subscribe, skip.');
       return;
     }
-
-    _isConnecting = true;
 
     final isFirstConnectForUser = _connectedUserId != userId;
     if (isFirstConnectForUser) {
@@ -352,21 +363,29 @@ class NotificationSocketService {
     debugPrint('Reverb Service: connecting ke $wsUri');
 
     try {
-      _wsChannel = WebSocketChannel.connect(wsUri);
+      // Tutup koneksi lama (kalau ada) supaya tidak ada socket yatim.
+      _wsSubscription?.cancel();
+      _wsChannel?.sink.close();
+
+      final channel = WebSocketChannel.connect(wsUri);
+      _wsChannel = channel;
       _isSocketOpen = true;
       _isSubscribed = false; // belum subscribed sampai confirmed
       _connectedUserId = userId;
       _reconnectAttempt = 0;
 
-      _wsSubscription = _wsChannel!.stream.listen(
+      _wsSubscription = channel.stream.listen(
         (raw) => _handleMessage(raw, userId, apiUri),
         onError: (e) {
+          // Abaikan event dari channel lama (sudah diganti koneksi baru).
+          if (!identical(channel, _wsChannel)) return;
           debugPrint('Reverb Service: WS error: $e');
           _isSocketOpen = false;
           _isSubscribed = false;
           _scheduleReconnect();
         },
         onDone: () {
+          if (!identical(channel, _wsChannel)) return;
           debugPrint('Reverb Service: WS closed.');
           _isSocketOpen = false;
           _isSubscribed = false;
@@ -379,8 +398,6 @@ class NotificationSocketService {
       _isSocketOpen = false;
       _isSubscribed = false;
       _scheduleReconnect();
-    } finally {
-      _isConnecting = false;
     }
   }
 
@@ -432,6 +449,13 @@ class NotificationSocketService {
     try {
       final msg = jsonDecode(raw as String);
       final event = msg['event'];
+
+      // Reverb mengirim ping berkala dan menutup koneksi kalau tidak dibalas
+      // pong. Klien mentah (tanpa pusher-js) harus membalasnya sendiri.
+      if (event == 'pusher:ping') {
+        _wsChannel?.sink.add(jsonEncode({'event': 'pusher:pong', 'data': {}}));
+        return;
+      }
 
       if (event == 'pusher:connection_established') {
         final connData = jsonDecode(msg['data']);
