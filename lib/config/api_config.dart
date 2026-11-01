@@ -2,12 +2,13 @@
 
 class ApiConfig {
   // ⚠️ Cukup ganti IP di sini, semua file akan otomatis mengikuti
-  static const String baseUrl = 'http://192.168.189.5:8000/api';
+  static const String baseUrl = 'http://192.168.189.13:8000/api';
 
   // Kumpulan Endpoint
   static const String googleLogin = '$baseUrl/auth/google/mobile';
   static const String manualLogin = '$baseUrl/auth/login';
   static const String logout = '$baseUrl/logout';
+  static const String refresh = '$baseUrl/auth/refresh';
 
   static const String userProfile = '$baseUrl/user';
   // Nanti kalau ada endpoint lain, tinggal tambah di sini:
