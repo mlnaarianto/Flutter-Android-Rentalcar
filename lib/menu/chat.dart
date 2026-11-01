@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:rentalcar/config/api_config.dart';
+import 'package:rentalcar/services/api_client.dart'; // 🟢 FASE 5: refresh token otomatis
 
 class ChatPage extends StatefulWidget {
   final String chatId;
@@ -11,7 +11,9 @@ class ChatPage extends StatefulWidget {
   final String receiverId;
   final String receiverName;
   final String? receiverAvatarUrl;
-  final String authToken;
+ 
+  // otomatis oleh ApiClient, jadi tidak perlu dioper dari halaman pemanggil
+  // (token yang dioper akan basi kalau chat dibuka lama).
 
   const ChatPage({
     super.key,
@@ -21,7 +23,6 @@ class ChatPage extends StatefulWidget {
     required this.receiverId,
     required this.receiverName,
     this.receiverAvatarUrl,
-    required this.authToken,
   });
 
   @override
@@ -89,7 +90,13 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     _fetchInitialMessages();
-    _resolveRealChatId().then((_) => _initReverbWebSocket());
+    _resolveRealChatId().then((_) {
+      // 🟢 FASE 5: kalau halaman sudah ditutup (atau sesi berakhir dan app
+      // dipindah ke LoginPage) selama request berjalan, jangan buka
+      // WebSocket baru -- tidak akan ada yang menutupnya.
+      if (!mounted) return;
+      _initReverbWebSocket();
+    });
   }
 
   @override
@@ -130,13 +137,14 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _fetchInitialMessages() async {
     try {
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/chats/${widget.chatId}/messages'),
-        headers: {
-          'Authorization': 'Bearer ${widget.authToken}',
-          'Accept': 'application/json',
-        },
       );
+
+      // 🟢 FASE 5: cek mounted setelah await. Dengan refresh token, request
+      // bisa lebih lama (refresh + retry), jadi peluang halaman sudah
+      // ditutup sebelum respons datang lebih besar.
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -154,18 +162,14 @@ class _ChatPageState extends State<ChatPage> {
       }
     } catch (e) {
       debugPrint("Gagal memuat pesan: $e");
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _resolveRealChatId() async {
     try {
-      final response = await http.get(
+      final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/chats/${widget.chatId}/resolve'),
-        headers: {
-          'Authorization': 'Bearer ${widget.authToken}',
-          'Accept': 'application/json',
-        },
       );
 
       if (response.statusCode == 200) {
@@ -246,18 +250,15 @@ class _ChatPageState extends State<ChatPage> {
     final channelName = 'private-chat.$targetChatId';
 
     try {
-      final authResponse = await http.post(
+      final authResponse = await ApiClient.instance.post(
         Uri.parse(_broadcastAuthUrl),
-        headers: {
-          'Authorization': 'Bearer ${widget.authToken}',
-          'Accept': 'application/json',
-        },
         body: {
           'socket_id': _socketId,
           'channel_name': channelName,
         },
       );
 
+      if (!mounted) return;
       if (authResponse.statusCode != 200) return;
 
       final authData = jsonDecode(authResponse.body);
@@ -296,13 +297,11 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.clear();
 
     try {
-      final response = await http.post(
+      // Content-Type JSON tetap diset di sini: ApiClient sengaja tidak
+      // mengaturnya (hanya Accept dan Authorization).
+      final response = await ApiClient.instance.post(
         Uri.parse('${ApiConfig.baseUrl}/messages'),
-        headers: {
-          'Authorization': 'Bearer ${widget.authToken}',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'chat_id': widget.chatId,
           'receiver_id': widget.receiverId,
@@ -371,12 +370,8 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     try {
-      final response = await http.delete(
+      final response = await ApiClient.instance.delete(
         Uri.parse('${ApiConfig.baseUrl}/messages/$messageId'),
-        headers: {
-          'Authorization': 'Bearer ${widget.authToken}',
-          'Accept': 'application/json',
-        },
       );
 
       if (response.statusCode != 200) {
