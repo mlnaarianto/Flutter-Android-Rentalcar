@@ -30,20 +30,25 @@ class _NavbarState extends State<Navbar> {
   // sendiri sudah hidup sejak login, dikelola terpusat di satu tempat.
   final NotificationSocketService _socketService = NotificationSocketService();
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN (PUTIH) =================
-  static const Color _fgColor = Color(0xFF1E293B);
+  // 🟢 DIHAPUS: _fgColor — sekarang pakai colorScheme.onSurface
+  // supaya otomatis gelap di light mode, terang di dark mode.
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return AppBar(
       automaticallyImplyLeading: false,
-      backgroundColor: Colors.white,
-      foregroundColor: _fgColor,
+      // 🟢 Adaptif: light → surface putih, dark → surface gelap
+      backgroundColor: colorScheme.surface,
+      foregroundColor: colorScheme.onSurface,
       elevation: 0,
-      surfaceTintColor: Colors.white,
+      surfaceTintColor: colorScheme.surface,
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Container(height: 1, color: Colors.grey.shade200),
+        // 🟢 Garis bawah halus, otomatis menyesuaikan mode
+        child: Container(height: 1, color: colorScheme.outlineVariant),
       ),
       leading: _isSearching
           ? IconButton(
@@ -68,10 +73,12 @@ class _NavbarState extends State<Navbar> {
           ? TextField(
               controller: _searchController,
               autofocus: true,
-              style: const TextStyle(color: _fgColor),
+              // 🟢 Teks ketikan ikut tema
+              style: TextStyle(color: colorScheme.onSurface),
               decoration: InputDecoration(
                 hintText: 'Cari sesuatu...',
-                hintStyle: TextStyle(color: Colors.grey.shade500),
+                // 🟢 Hint lebih redup, tetap terbaca di kedua mode
+                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                 border: InputBorder.none,
               ),
               onChanged: widget.onSearchChanged,
@@ -131,9 +138,15 @@ class _NavbarState extends State<Navbar> {
                       width: 10,
                       height: 10,
                       decoration: BoxDecoration(
-                        color: Colors.red,
+                        // 🟢 error = merah di light, merah terang di dark
+                        color: colorScheme.error,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1.5),
+                        // 🟢 border pakai surface (sama dgn bg AppBar),
+                        // supaya "menyatu" di kedua mode
+                        border: Border.all(
+                          color: colorScheme.surface,
+                          width: 1.5,
+                        ),
                       ),
                     ),
                   );

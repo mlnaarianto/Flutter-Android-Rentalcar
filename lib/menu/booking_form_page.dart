@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/services/api_client.dart';
 import 'package:rentalcar/menu/profil.dart';
-import 'package:rentalcar/menu/booking_history_page.dart'; // 👈 DITAMBAHKAN: dibutuhkan untuk redirect ke Riwayat Pemesanan
+import 'package:rentalcar/menu/booking_history_page.dart';
 
 class BookingFormPage extends StatefulWidget {
   final Map<String, dynamic> car;
@@ -22,21 +22,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
   final TextEditingController _notesController = TextEditingController();
   bool _isSubmitting = false;
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND & SEMANTIC COLORS (tetap di light & dark) =====
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
   static const Color _successColor = Color(0xFF16A34A);
   static const Color _dangerColor = Color(0xFFDC2626);
   static const Color _indigoColor = Color(0xFF6366F1);
+  // 🟢 DIHAPUS: _bgColor — pakai surfaceContainerHighest
 
-  // Ambil tarif driver secara dinamis dari data mobil yang dipilih
   double get _driverRatePerDay {
-    return double.tryParse(widget.car['driver_price_per_day']?.toString() ?? '0') ?? 0.0;
+    return double.tryParse(
+            widget.car['driver_price_per_day']?.toString() ?? '0') ??
+        0.0;
   }
 
   double get _carRatePerDay {
-    return double.tryParse(widget.car['price_per_day']?.toString() ?? '0') ?? 0.0;
+    return double.tryParse(widget.car['price_per_day']?.toString() ?? '0') ??
+        0.0;
   }
 
   int get _totalDays {
@@ -50,7 +52,6 @@ class _BookingFormPageState extends State<BookingFormPage> {
     return _totalDays * (_carRatePerDay + driverFee);
   }
 
-  /// Format angka jadi "Rp 1.200.000" tanpa desimal, konsisten dgn halaman lain
   String _formatPrice(dynamic raw) {
     if (raw == null) return 'Rp 0';
     final numValue = num.tryParse(raw.toString()) ?? 0;
@@ -67,13 +68,11 @@ class _BookingFormPageState extends State<BookingFormPage> {
     return 'Rp $buffer';
   }
 
-  // Fungsi helper untuk memformat DateTime menjadi string bersih (YYYY-MM-DD)
   String _formatDate(DateTime? date) {
     if (date == null) return '';
     return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
   }
 
-  /// Format tanggal untuk ditampilkan ke user, mis. "30 Agu 2026"
   String _formatDateDisplay(DateTime? date) {
     if (date == null) return '';
     const months = [
@@ -95,10 +94,15 @@ class _BookingFormPageState extends State<BookingFormPage> {
       initialDate: DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
+      // 🟢 DIPERBAIKI: sebelumnya di-hardcode ColorScheme.light(),
+      // jadi di dark mode date picker tetap putih terang menyilaukan.
+      // Sekarang pakai colorScheme aktif hanya untuk override primary —
+      // brightness & surface otomatis ikut tema.
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(primary: _primaryColor),
+            colorScheme:
+                Theme.of(context).colorScheme.copyWith(primary: _primaryColor),
           ),
           child: child!,
         );
@@ -118,11 +122,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
     }
   }
 
-  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
-  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _submitBooking() async {
     if (_startDate == null || _endDate == null) {
-      _showSnackBar('Silakan pilih tanggal mulai dan selesai sewa!', _accentColor);
+      _showSnackBar(
+          'Silakan pilih tanggal mulai dan selesai sewa!', _accentColor);
       return;
     }
 
@@ -134,8 +137,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'car_id': widget.car['id'],
-          'start_date': _formatDate(_startDate), // Menggunakan format bersih YYYY-MM-DD
-          'end_date': _formatDate(_endDate),     // Menggunakan format bersih YYYY-MM-DD
+          'start_date': _formatDate(_startDate),
+          'end_date': _formatDate(_endDate),
           'with_driver': _withDriver,
           'payment_method': _paymentMethod,
           'notes': _notesController.text,
@@ -152,15 +155,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
       final decoded = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        // 👇 DIGANTI: dulu cuma Navigator.pop(context, true) (balik ke halaman
-        // sebelumnya / detail mobil). Sekarang, setelah booking sukses,
-        // langsung dilempar ke halaman Riwayat Pemesanan (path menu yang sama:
-        // BookingHistoryPage), dan seluruh stack navigasi sebelumnya
-        // (form + detail mobil) dibersihkan sampai halaman paling awal
-        // (route.isFirst, biasanya Home/Dashboard). Jadi kalau user tekan
-        // tombol back dari halaman Riwayat, dia langsung ke Home, bukan
-        // balik lagi ke form/detail mobil yang sudah tidak relevan.
-        _showSnackBar('Booking berhasil dibuat! Silakan cek riwayat pesanan.', _successColor);
+        _showSnackBar(
+            'Booking berhasil dibuat! Silakan cek riwayat pesanan.',
+            _successColor);
 
         Navigator.pushAndRemoveUntil(
           context,
@@ -181,7 +178,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
           _showPendingWarningDialog(message);
         }
       } else {
-        _showSnackBar(decoded['message'] ?? 'Gagal membuat booking', _dangerColor);
+        _showSnackBar(
+            decoded['message'] ?? 'Gagal membuat booking', _dangerColor);
       }
     } catch (e) {
       if (!mounted) return;
@@ -196,7 +194,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: color,
+        backgroundColor: color, // 🟢 semantic, tetap
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -207,45 +205,60 @@ class _BookingFormPageState extends State<BookingFormPage> {
   void _showPendingWarningDialog(String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Pesanan Pending Ditemukan',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(
-          message,
-          style: TextStyle(color: Colors.grey.shade700, fontSize: 13.5),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            style: FilledButton.styleFrom(
-              backgroundColor: _primaryColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      builder: (context) {
+        // 🟢 Ambil colorScheme dari context dialog
+        final colorScheme = Theme.of(context).colorScheme;
+
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Pesanan Pending Ditemukan',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(
+            message,
+            style: TextStyle(
+              // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 13.5,
             ),
-            child: const Text('OK'),
           ),
-        ],
-      ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              style: FilledButton.styleFrom(
+                backgroundColor: _primaryColor, // brand
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor
       appBar: AppBar(
         title: const Text(
           'Form Pemesanan Mobil',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: false,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1E293B),
+        // 🟢 AppBar pakai token tema
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: colorScheme.surface,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey.shade200),
+          child: Container(height: 1, color: colorScheme.outlineVariant),
         ),
       ),
       body: ListView(
@@ -276,26 +289,33 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   Widget _buildSectionTitle(String title) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 13.5,
         fontWeight: FontWeight.bold,
-        color: Color(0xFF1E293B),
+        // 🟢 Ganti Color(0xFF1E293B) → onSurface
+        color: colorScheme.onSurface,
       ),
     );
   }
 
   Widget _card({required Widget child}) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -307,6 +327,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ================= CARD: RINGKASAN MOBIL =================
   Widget _buildCarSummaryCard() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return _card(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -314,7 +336,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _primaryColor.withOpacity(0.08),
+              // 🟢 0.08 → 0.15, tetap kelihatan di dark
+              color: _primaryColor.withOpacity(0.15),
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.directions_car_rounded,
@@ -327,24 +350,29 @@ class _BookingFormPageState extends State<BookingFormPage> {
               children: [
                 Text(
                   widget.car['name'] ?? 'Mobil Rental',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
+                    // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                    color: colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Icon(Icons.local_offer_outlined,
-                        size: 13, color: Colors.grey.shade400),
+                    Icon(
+                      Icons.local_offer_outlined,
+                      size: 13,
+                      // 🟢 Ganti Colors.grey.shade400 → outline
+                      color: colorScheme.outline,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '${_formatPrice(_carRatePerDay)} / hari',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: _primaryColor,
+                        color: _primaryColor, // brand
                       ),
                     ),
                   ],
@@ -353,15 +381,18 @@ class _BookingFormPageState extends State<BookingFormPage> {
                   const SizedBox(height: 3),
                   Row(
                     children: [
-                      Icon(Icons.person_outline_rounded,
-                          size: 13, color: Colors.grey.shade400),
+                      Icon(
+                        Icons.person_outline_rounded,
+                        size: 13,
+                        color: colorScheme.outline,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Tarif Sopir: ${_formatPrice(_driverRatePerDay)} / hari',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: _indigoColor,
+                          color: _indigoColor, // brand semantic
                         ),
                       ),
                     ],
@@ -377,6 +408,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ================= CARD: TANGGAL SEWA =================
   Widget _buildDateCard() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return _card(
       child: Column(
         children: [
@@ -385,7 +418,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
             date: _startDate,
             onTap: () => _selectDate(context, true),
           ),
-          Divider(height: 20, color: Colors.grey.shade200),
+          Divider(height: 20, color: colorScheme.outlineVariant),
           _buildDateTile(
             label: 'Tanggal Selesai',
             date: _endDate,
@@ -397,7 +430,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
-                color: _successColor.withOpacity(0.08),
+                // 🟢 0.08 → 0.15, hijau semantic
+                color: _successColor.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Center(
@@ -422,19 +456,24 @@ class _BookingFormPageState extends State<BookingFormPage> {
     required DateTime? date,
     required VoidCallback onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: _bgColor,
+          // 🟢 Ganti _bgColor → surfaceContainerHighest
+          color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
+          // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+          border: Border.all(color: colorScheme.outlineVariant),
         ),
         child: Row(
           children: [
-            Icon(Icons.calendar_today_rounded, size: 17, color: _primaryColor),
+            const Icon(Icons.calendar_today_rounded,
+                size: 17, color: _primaryColor),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -442,21 +481,31 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 children: [
                   Text(
                     label,
-                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500),
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    date == null ? 'Ketuk untuk memilih' : _formatDateDisplay(date),
+                    date == null
+                        ? 'Ketuk untuk memilih'
+                        : _formatDateDisplay(date),
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,
-                      color: date == null ? Colors.grey.shade400 : const Color(0xFF1E293B),
+                      // 🟢 Placeholder pakai outline (redup),
+                      //    tanggal terisi pakai onSurface (terang)
+                      color: date == null
+                          ? colorScheme.outline
+                          : colorScheme.onSurface,
                     ),
                   ),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+            Icon(Icons.chevron_right_rounded, color: colorScheme.outline),
           ],
         ),
       ),
@@ -465,6 +514,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ================= CARD: OPSI TAMBAHAN =================
   Widget _buildOptionsCard() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return _card(
       child: Column(
         children: [
@@ -473,7 +524,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _accentColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.15, oranye semantic
+                  color: _accentColor.withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.person_pin_circle_outlined,
@@ -484,20 +536,30 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Gunakan Jasa Sopir',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                        // 🟢 Tambahkan onSurface (sebelumnya default)
+                        color: colorScheme.onSurface,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       'Tambahan ${_formatPrice(_driverRatePerDay)} / hari',
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
               Switch(
                 value: _withDriver,
+                // 🟢 Brand biru — tetap di kedua mode
                 activeColor: _primaryColor,
                 onChanged: (val) {
                   setState(() {
@@ -507,14 +569,15 @@ class _BookingFormPageState extends State<BookingFormPage> {
               ),
             ],
           ),
-          Divider(height: 24, color: Colors.grey.shade200),
+          Divider(height: 24, color: colorScheme.outlineVariant),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _primaryColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.15, biru brand
+                  color: _primaryColor.withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.payments_outlined,
@@ -525,33 +588,45 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Metode Pembayaran',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                        color: colorScheme.onSurface,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: _paymentMethod,
                       isExpanded: true,
-                      style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
+                      // 🟢 Teks dropdown ikut tema
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: colorScheme.onSurface,
+                      ),
                       icon: Icon(Icons.keyboard_arrow_down_rounded,
-                          color: Colors.grey.shade500),
+                          color: colorScheme.onSurfaceVariant),
                       decoration: InputDecoration(
                         filled: true,
-                        fillColor: _bgColor,
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        // 🟢 Ganti _bgColor → surfaceContainerHighest
+                        fillColor: colorScheme.surfaceContainerHighest,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey.shade200),
+                          // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+                          borderSide:
+                              BorderSide(color: colorScheme.outlineVariant),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: _primaryColor, width: 1.4),
+                          borderSide: const BorderSide(
+                              color: _primaryColor, width: 1.4),
                         ),
                       ),
                       items: const [
@@ -582,14 +657,24 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ================= CATATAN =================
   Widget _buildNotesField() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return _card(
       child: TextField(
         controller: _notesController,
         maxLines: 2,
-        style: const TextStyle(fontSize: 13.5),
+        style: TextStyle(
+          fontSize: 13.5,
+          // 🟢 Teks input ikut tema
+          color: colorScheme.onSurface,
+        ),
         decoration: InputDecoration(
           hintText: 'Contoh: Tolong dibersihkan dulu, dijemput jam 9 pagi, dll.',
-          hintStyle: TextStyle(fontSize: 12.5, color: Colors.grey.shade400),
+          hintStyle: TextStyle(
+            fontSize: 12.5,
+            // 🟢 Ganti Colors.grey.shade400 → outline
+            color: colorScheme.outline,
+          ),
           border: InputBorder.none,
           isCollapsed: true,
         ),
@@ -599,24 +684,35 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ================= CARD: RINGKASAN BIAYA =================
   Widget _buildSummaryCard() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _primaryColor.withOpacity(0.05),
+        // 🟢 0.05 → 0.12, tetap kelihatan di dark (sebelumnya nyaris tak
+        // terlihat karena opacity sangat rendah di atas bg gelap)
+        color: _primaryColor.withOpacity(0.12),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _primaryColor.withOpacity(0.15)),
+        // 🟢 0.15 → 0.30 border biar jelas di dark
+        border: Border.all(color: _primaryColor.withOpacity(0.30)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.receipt_long_rounded, size: 16, color: _primaryColor),
+              const Icon(Icons.receipt_long_rounded,
+                  size: 16, color: _primaryColor),
               const SizedBox(width: 6),
-              const Text(
+              Text(
                 'Ringkasan Biaya',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13.5,
+                  // 🟢 Tambahkan onSurface
+                  color: colorScheme.onSurface,
+                ),
               ),
             ],
           ),
@@ -634,20 +730,28 @@ class _BookingFormPageState extends State<BookingFormPage> {
             'Metode Pembayaran',
             _paymentMethod == 'cod' ? 'Bayar di Tempat (COD)' : 'QRIS',
           ),
-          Divider(height: 20, color: _primaryColor.withOpacity(0.15)),
+          Divider(
+            height: 20,
+            // 🟢 Naikkan opacity biar kelihatan di dark
+            color: _primaryColor.withOpacity(0.30),
+          ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Total Biaya',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
+                ),
               ),
               Text(
                 _formatPrice(_totalPrice),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
-                  color: _primaryColor,
+                  color: _primaryColor, // brand biru
                 ),
               ),
             ],
@@ -658,14 +762,27 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   Widget _summaryRow(String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
         Text(
           value,
-          style: const TextStyle(
-              fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            // 🟢 Ganti Color(0xFF1E293B) → onSurface
+            color: colorScheme.onSurface,
+          ),
         ),
       ],
     );
@@ -679,11 +796,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
       child: ElevatedButton.icon(
         onPressed: _isSubmitting ? null : _submitBooking,
         style: ElevatedButton.styleFrom(
+          // 🟢 Brand biru, tetap sama di kedua mode
           backgroundColor: _primaryColor,
           foregroundColor: Colors.white,
           elevation: 0,
           disabledBackgroundColor: _primaryColor.withOpacity(0.5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         icon: _isSubmitting
             ? const SizedBox.shrink()

@@ -7,11 +7,11 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/menu/profil.dart';
-import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums agar konsisten
-import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/enums/app_enums.dart';
+import 'package:rentalcar/services/api_client.dart';
 
 class CarAddPage extends StatefulWidget {
-  final Map<String, dynamic>? carData; // Jika ada data, berarti mode Edit
+  final Map<String, dynamic>? carData;
 
   const CarAddPage({super.key, this.carData});
 
@@ -22,7 +22,6 @@ class CarAddPage extends StatefulWidget {
 class _CarAddPageState extends State<CarAddPage> {
   final _formKey = GlobalKey<FormState>();
 
-  // Controller Input Form
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _brandController = TextEditingController();
   final TextEditingController _plateController = TextEditingController();
@@ -34,7 +33,6 @@ class _CarAddPageState extends State<CarAddPage> {
   final TextEditingController _fuelSpecController = TextEditingController();
   final TextEditingController _videoUrlController = TextEditingController();
 
-  // Nilai Default Dropdown
   String _engineType = 'Bensin (Gasoline)';
   String _status = 'tersedia';
 
@@ -51,10 +49,10 @@ class _CarAddPageState extends State<CarAddPage> {
   bool _isLoading = false;
   bool get _isEditMode => widget.carData != null;
 
-  // ================= WARNA SENADA DENGAN CarDetailPage =================
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 DIHAPUS: _bgColor — field & chip pakai colorScheme.surfaceContainerHighest
 
   @override
   void initState() {
@@ -117,10 +115,6 @@ class _CarAddPageState extends State<CarAddPage> {
     }
   }
 
-  /// 🟢 Membangun MultipartRequest baru. Dipanggil ulang oleh
-  /// ApiClient.sendMultipart saat retry setelah 401, karena request
-  /// multipart hanya bisa dikirim sekali (file dibaca ulang dari disk).
-  /// Header Authorization TIDAK diset di sini: ApiClient yang memasang.
   Future<http.MultipartRequest> _buildRequest() async {
     final String url = _isEditMode
         ? '${ApiConfig.baseUrl}/cars/${widget.carData!['id']}'
@@ -163,14 +157,11 @@ class _CarAddPageState extends State<CarAddPage> {
     });
 
     try {
-      // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
       final streamedResponse = await ApiClient.instance
           .sendMultipart(_buildRequest)
           .timeout(const Duration(seconds: 90));
       final response = await http.Response.fromStream(streamedResponse);
 
-      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
-      // halaman ini sudah tidak ada. Jangan lanjut pakai context.
       if (!mounted) return;
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -182,8 +173,6 @@ class _CarAddPageState extends State<CarAddPage> {
         );
         Navigator.pop(context, true);
       } else if (response.statusCode == 401) {
-        // Sampai sini berarti refresh gagal sementara (jaringan/server),
-        // bukan sesi mati (kalau sesi mati, sudah ke LoginPage).
         _showSnackBar(
           'Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.',
           Colors.red,
@@ -233,7 +222,7 @@ class _CarAddPageState extends State<CarAddPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: color,
+        backgroundColor: color, // 🟢 semantic color, tetap
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -260,19 +249,23 @@ class _CarAddPageState extends State<CarAddPage> {
   Widget _sectionCard({
     required String title,
     required IconData icon,
-    required Color iconColor,
+    required Color iconColor, // 🟢 tetap: brand per section
     String? subtitle,
     required List<Widget> children,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema (bukan hitam pekat di dark)
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -286,7 +279,8 @@ class _CarAddPageState extends State<CarAddPage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.12, tetap kelihatan di dark
+                  color: iconColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, color: iconColor, size: 20),
@@ -298,10 +292,11 @@ class _CarAddPageState extends State<CarAddPage> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15.5,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E293B),
+                        // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                        color: colorScheme.onSurface,
                       ),
                     ),
                     if (subtitle != null)
@@ -310,7 +305,10 @@ class _CarAddPageState extends State<CarAddPage> {
                         child: Text(
                           subtitle,
                           style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600),
+                            fontSize: 12,
+                            // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                            color: colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                   ],
@@ -335,21 +333,26 @@ class _CarAddPageState extends State<CarAddPage> {
     int maxLines = 1,
     String? Function(String?)? validator,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
-        style: const TextStyle(fontSize: 14),
+        // 🟢 Teks input ikut tema
+        style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
           prefixIcon: icon != null
-              ? Icon(icon, size: 19, color: Colors.grey.shade500)
+              ? Icon(icon, size: 19, color: colorScheme.onSurfaceVariant)
               : null,
           filled: true,
-          fillColor: _bgColor,
+          // 🟢 Ganti _bgColor → surfaceContainerHighest
+          // (light: abu terang, dark: abu sedikit lebih terang dari surface)
+          fillColor: colorScheme.surfaceContainerHighest,
           isDense: true,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -359,7 +362,8 @@ class _CarAddPageState extends State<CarAddPage> {
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade200),
+            // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+            borderSide: BorderSide(color: colorScheme.outlineVariant),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -367,15 +371,22 @@ class _CarAddPageState extends State<CarAddPage> {
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
+            // 🟢 Tetap merahAccent — warna error semantic
             borderSide: const BorderSide(color: Colors.redAccent),
           ),
-          labelStyle: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+          labelStyle: TextStyle(
+            // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 13,
+          ),
         ),
         validator: validator,
       ),
     );
   }
 
+  // 🟢 _statusColor / _statusLabel / _statusIcon — TIDAK diubah
+  // Warna semantic status tetap di kedua mode.
   Color _statusColor(String status) {
     switch (status) {
       case 'tersedia':
@@ -417,21 +428,24 @@ class _CarAddPageState extends State<CarAddPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor → pakai default tema
       appBar: AppBar(
         title: Text(
           _isEditMode ? 'Edit Data Mobil' : 'Tambah Mobil Baru',
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: false,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1E293B),
+        // 🟢 Semua AppBar pakai token tema
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: colorScheme.surface,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey.shade200),
+          child: Container(height: 1, color: colorScheme.outlineVariant),
         ),
       ),
       body: Form(
@@ -487,15 +501,16 @@ class _CarAddPageState extends State<CarAddPage> {
                     icon: Icons.build_circle_outlined,
                     iconColor: _accentColor,
                     children: [
+                      // 🟢 Dropdown decoration disamakan dengan _field
                       DropdownButtonFormField<String>(
                         value: _engineType,
                         isExpanded: true,
                         decoration: InputDecoration(
                           labelText: 'Tipe Mesin Penggerak',
                           prefixIcon: Icon(Icons.settings_outlined,
-                              size: 19, color: Colors.grey.shade500),
+                              size: 19, color: colorScheme.onSurfaceVariant),
                           filled: true,
-                          fillColor: _bgColor,
+                          fillColor: colorScheme.surfaceContainerHighest,
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 14),
@@ -505,7 +520,8 @@ class _CarAddPageState extends State<CarAddPage> {
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey.shade200),
+                            borderSide:
+                                BorderSide(color: colorScheme.outlineVariant),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -513,13 +529,19 @@ class _CarAddPageState extends State<CarAddPage> {
                                 color: _primaryColor, width: 1.4),
                           ),
                           labelStyle: TextStyle(
-                              color: Colors.grey.shade600, fontSize: 13),
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 13,
+                          ),
                         ),
                         items: _engineTypes
                             .map((type) => DropdownMenuItem(
-                                value: type,
-                                child: Text(type,
-                                    style: const TextStyle(fontSize: 14))))
+                                  value: type,
+                                  child: Text(type,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: colorScheme.onSurface,
+                                      )),
+                                ))
                             .toList(),
                         onChanged: (value) =>
                             setState(() => _engineType = value!),
@@ -567,7 +589,7 @@ class _CarAddPageState extends State<CarAddPage> {
                     title: 'Harga & Ketersediaan',
                     subtitle: 'Atur tarif sewa dan status mobil',
                     icon: Icons.payments_outlined,
-                    iconColor: const Color(0xFF16A34A),
+                    iconColor: const Color(0xFF16A34A), // semantic hijau
                     children: [
                       _field(
                         controller: _priceController,
@@ -588,7 +610,10 @@ class _CarAddPageState extends State<CarAddPage> {
                       Text(
                         'Status Mobil',
                         style: TextStyle(
-                            fontSize: 12.5, color: Colors.grey.shade600),
+                          fontSize: 12.5,
+                          // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Wrap(
@@ -596,7 +621,7 @@ class _CarAddPageState extends State<CarAddPage> {
                         runSpacing: 8,
                         children: _statuses.map((st) {
                           final bool selected = st == _status;
-                          final color = _statusColor(st);
+                          final color = _statusColor(st); // semantic, tetap
                           return GestureDetector(
                             onTap: () => setState(() => _status = st),
                             child: AnimatedContainer(
@@ -604,25 +629,30 @@ class _CarAddPageState extends State<CarAddPage> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
+                                // 🟢 Unselected pakai surfaceContainerHighest
+                                // biar selaras dengan field; selected pakai
+                                // warna semantic dengan opacity 0.15
                                 color: selected
-                                    ? color.withOpacity(0.1)
-                                    : _bgColor,
+                                    ? color.withOpacity(0.15)
+                                    : colorScheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                   color: selected
                                       ? color
-                                      : Colors.grey.shade200,
+                                      : colorScheme.outlineVariant,
                                   width: selected ? 1.4 : 1,
                                 ),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(_statusIcon(st),
-                                      size: 16,
-                                      color: selected
-                                          ? color
-                                          : Colors.grey.shade500),
+                                  Icon(
+                                    _statusIcon(st),
+                                    size: 16,
+                                    color: selected
+                                        ? color
+                                        : colorScheme.onSurfaceVariant,
+                                  ),
                                   const SizedBox(width: 6),
                                   Text(
                                     _statusLabel(st),
@@ -631,7 +661,7 @@ class _CarAddPageState extends State<CarAddPage> {
                                       fontWeight: FontWeight.w600,
                                       color: selected
                                           ? color
-                                          : Colors.grey.shade600,
+                                          : colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ],
@@ -676,10 +706,12 @@ class _CarAddPageState extends State<CarAddPage> {
               padding: EdgeInsets.fromLTRB(
                   16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
               decoration: BoxDecoration(
-                color: Colors.white,
+                // 🟢 surface: light = putih, dark = abu gelap
+                color: colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.06),
+                    // 🟢 shadow dari tema
+                    color: colorScheme.shadow.withOpacity(0.08),
                     blurRadius: 16,
                     offset: const Offset(0, -4),
                   ),
@@ -691,6 +723,7 @@ class _CarAddPageState extends State<CarAddPage> {
                 child: ElevatedButton.icon(
                   onPressed: _isLoading ? null : _submitCar,
                   style: ElevatedButton.styleFrom(
+                    // 🟢 Tombol biru brand — tetap sama di kedua mode
                     backgroundColor: _primaryColor,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: _primaryColor.withOpacity(0.6),
@@ -733,6 +766,8 @@ class _CarAddPageState extends State<CarAddPage> {
 
   // ================= WIDGET FOTO MOBIL =================
   Widget _buildPhotoPicker() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     final bool hasImage = _imageFile != null ||
         (_existingImageUrl != null && _existingImageUrl!.isNotEmpty);
 
@@ -744,15 +779,20 @@ class _CarAddPageState extends State<CarAddPage> {
             width: 140,
             height: 140,
             decoration: BoxDecoration(
-              color: Colors.white,
+              // 🟢 Ganti Colors.white → surface
+              color: colorScheme.surface,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: hasImage ? Colors.transparent : Colors.grey.shade300,
+                // 🟢 Ganti Colors.grey.shade300 → outlineVariant
+                color: hasImage
+                    ? Colors.transparent
+                    : colorScheme.outlineVariant,
                 width: 1.4,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
+                  // 🟢 shadow dari tema
+                  color: colorScheme.shadow.withOpacity(0.08),
                   blurRadius: 14,
                   offset: const Offset(0, 6),
                 ),
@@ -774,7 +814,8 @@ class _CarAddPageState extends State<CarAddPage> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: _primaryColor.withOpacity(0.08),
+                          // 🟢 0.08 → 0.15, biar tetap kelihatan di dark
+                          color: _primaryColor.withOpacity(0.15),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.add_a_photo_outlined,
@@ -786,7 +827,8 @@ class _CarAddPageState extends State<CarAddPage> {
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade600,
+                          // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                          color: colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -800,8 +842,10 @@ class _CarAddPageState extends State<CarAddPage> {
               child: Container(
                 padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
+                  // 🟢 _primaryColor brand — tetap
                   color: _primaryColor,
                   shape: BoxShape.circle,
+                  // 🟢 Border putih karena di atas FOTO, bukan surface
                   border: Border.all(color: Colors.white, width: 2),
                 ),
                 child: const Icon(Icons.edit_rounded,

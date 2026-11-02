@@ -38,9 +38,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   final MapController _businessMapController = MapController();
 
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 DIHAPUS: _bgColor
 
   @override
   void initState() {
@@ -52,8 +53,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
     _fetchCarDetail();
   }
 
-  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
-  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchCarDetail() async {
     setState(() {
       _isLoading = true;
@@ -120,8 +119,6 @@ class _CarDetailPageState extends State<CarDetailPage> {
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
 
-      // Halaman sudah ditutup saat video masih dimuat: buang controller
-      // supaya tidak bocor.
       if (!mounted) {
         controller.dispose();
         return;
@@ -138,7 +135,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
           playedColor: _primaryColor,
           handleColor: _primaryColor,
           bufferedColor: _primaryColor.withOpacity(0.15),
-          backgroundColor: Colors.grey.shade300,
+          backgroundColor: Colors.grey.shade300, // netral, tetap
         ),
       );
 
@@ -205,6 +202,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
     }
   }
 
+  // 🟢 Warna status semantic — tetap di kedua mode
   Color _getStatusColor(String status) {
     switch (status) {
       case 'tersedia':
@@ -272,22 +270,27 @@ class _CarDetailPageState extends State<CarDetailPage> {
     );
   }
 
+  // ================= HELPER UI: SECTION CARD =================
   Widget _sectionCard({
     required String title,
     required IconData icon,
-    required Color iconColor,
+    required Color iconColor, // brand per section, tetap
     String? subtitle,
     required List<Widget> children,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -301,7 +304,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.12, biar kelihatan di dark
+                  color: iconColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, color: iconColor, size: 20),
@@ -313,10 +317,11 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15.5,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E293B),
+                        // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                        color: colorScheme.onSurface,
                       ),
                     ),
                     if (subtitle != null)
@@ -326,7 +331,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                           subtitle,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey.shade600,
+                            // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                            color: colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ),
@@ -343,6 +349,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _infoTile(IconData icon, String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -351,7 +359,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
           Container(
             padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
-              color: _primaryColor.withOpacity(0.08),
+              // 🟢 0.08 → 0.15, brand biru
+              color: _primaryColor.withOpacity(0.15),
               borderRadius: BorderRadius.circular(9),
             ),
             child: Icon(icon, size: 16, color: _primaryColor),
@@ -363,15 +372,20 @@ class _CarDetailPageState extends State<CarDetailPage> {
               children: [
                 Text(
                   label,
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 1),
                 Text(
                   value.isEmpty ? '-' : value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
+                    // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -384,7 +398,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   /// ================= PHONE / WHATSAPP TILE =================
   Widget _buildPhoneTile(String phone) {
+    final colorScheme = Theme.of(context).colorScheme;
     final bool hasPhone = phone.isNotEmpty && phone != '-';
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -393,7 +409,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
           Container(
             padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
-              color: _primaryColor.withOpacity(0.08),
+              color: _primaryColor.withOpacity(0.15),
               borderRadius: BorderRadius.circular(9),
             ),
             child: Icon(Icons.phone_outlined, size: 16, color: _primaryColor),
@@ -405,15 +421,18 @@ class _CarDetailPageState extends State<CarDetailPage> {
               children: [
                 Text(
                   'Nomor HP',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 1),
                 Text(
                   phone.isEmpty ? '-' : phone,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -422,15 +441,14 @@ class _CarDetailPageState extends State<CarDetailPage> {
           if (hasPhone) ...[
             _phoneActionButton(
               icon: Icons.call_rounded,
-              color: const Color(0xFF16A34A),
+              color: const Color(0xFF16A34A), // hijau semantic
               tooltip: 'Telepon',
               onPressed: () => _launchPhoneCall(phone),
             ),
             const SizedBox(width: 8),
             _phoneActionButton(
-              icon: FontAwesomeIcons
-                  .whatsapp, // 👈 diganti dari Icons.chat_rounded
-              color: const Color(0xFF25D366),
+              icon: FontAwesomeIcons.whatsapp,
+              color: const Color(0xFF25D366), // WA brand green
               tooltip: 'WhatsApp',
               onPressed: () => _launchWhatsApp(phone),
             ),
@@ -442,7 +460,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   Widget _phoneActionButton({
     required dynamic icon,
-    required Color color,
+    required Color color, // brand/semantic
     required String tooltip,
     required VoidCallback onPressed,
   }) {
@@ -453,7 +471,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: color.withOpacity(0.1),
+        // 🟢 0.1 → 0.15, biar tetap kelihatan di dark
+        color: color.withOpacity(0.15),
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
@@ -471,24 +490,17 @@ class _CarDetailPageState extends State<CarDetailPage> {
     return phone.replaceAll(RegExp(r'[^0-9+]'), '');
   }
 
-  /// Konversi nomor ke format internasional untuk wa.me (tanpa '+', tanpa '0' di depan)
-  /// Mendukung multi-negara: kalau nomor sudah punya '+' atau kode negara, dipakai apa adanya.
-  /// Kalau nomor masih format lokal (diawali '0'), baru pakai [defaultCountryCode] sebagai fallback.
   String _toWhatsAppFormat(String phone, {String defaultCountryCode = '62'}) {
     String digits = _sanitizePhoneDigits(phone);
 
-    // Kasus 1: nomor sudah eksplisit pakai '+' -> kode negara sudah pasti benar, tinggal buang '+'
     if (digits.startsWith('+')) {
       return digits.substring(1);
     }
 
-    // Kasus 2: nomor format lokal (diawali '0') -> ga ada info negara, pakai default sebagai fallback
     if (digits.startsWith('0')) {
       return '$defaultCountryCode${digits.substring(1)}';
     }
 
-    // Kasus 3: nomor sudah diawali kode negara tanpa '+' dan tanpa '0' (mis. 60123456789, 6281234567890)
-    // -> dibiarkan apa adanya, tidak dipaksa jadi '62'
     return digits;
   }
 
@@ -546,20 +558,25 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _specChip(IconData icon, String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: (MediaQuery.of(context).size.width - 32 - 18 * 2 - 10) / 2,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _bgColor,
+        // 🟢 Ganti _bgColor → surfaceContainerHighest
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200),
+        // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _accentColor.withOpacity(0.1),
+              // 🟢 0.1 → 0.15, oranye brand
+              color: _accentColor.withOpacity(0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 18, color: _accentColor),
@@ -571,17 +588,22 @@ class _CarDetailPageState extends State<CarDetailPage> {
               children: [
                 Text(
                   label,
-                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 1),
                 Text(
                   value.isEmpty ? '-' : value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF1E293B),
+                    // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -633,27 +655,28 @@ class _CarDetailPageState extends State<CarDetailPage> {
     final driverPrice = _car?['driver_price_per_day'] ?? 0;
 
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor — pakai default tema
       extendBodyBehindAppBar: true,
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: _primaryColor))
           : _errorMessage != null
-          ? _buildErrorState()
-          : _car == null
-          ? _buildEmptyState()
-          : _buildContent(
-              status,
-              driverPrice,
-              ownerName,
-              ownerEmail,
-              ownerPhone,
-              ownerAddress,
-              businessName,
-              businessAddress,
-              businessLat,
-              businessLng,
-              hasLocation,
-            ),
+              ? _buildErrorState()
+              : _car == null
+                  ? _buildEmptyState()
+                  : _buildContent(
+                      status,
+                      driverPrice,
+                      ownerName,
+                      ownerEmail,
+                      ownerPhone,
+                      ownerAddress,
+                      businessName,
+                      businessAddress,
+                      businessLat,
+                      businessLng,
+                      hasLocation,
+                    ),
       bottomNavigationBar: _isLoading || _car == null || _errorMessage != null
           ? null
           : _buildBottomBar(status),
@@ -661,6 +684,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildErrorState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -670,20 +695,25 @@ class _CarDetailPageState extends State<CarDetailPage> {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.08),
+                // 🟢 0.08 → 0.15
+                color: colorScheme.error.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.error_outline_rounded,
                 size: 40,
-                color: Colors.red,
+                color: colorScheme.error,
               ),
             ),
             const SizedBox(height: 16),
             Text(
               _errorMessage!,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              style: TextStyle(
+                // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
@@ -691,7 +721,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Coba Lagi'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryColor,
+                backgroundColor: _primaryColor, // brand
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -709,6 +739,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildEmptyState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -716,10 +748,14 @@ class _CarDetailPageState extends State<CarDetailPage> {
           Icon(
             Icons.directions_car_outlined,
             size: 48,
-            color: Colors.grey.shade400,
+            // 🟢 Ganti Colors.grey.shade400 → outline
+            color: colorScheme.outline,
           ),
           const SizedBox(height: 12),
-          const Text('Data mobil tidak ditemukan.'),
+          Text(
+            'Data mobil tidak ditemukan.',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          ),
         ],
       ),
     );
@@ -740,10 +776,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
           GestureDetector(
             onTap: hasImage
                 ? () => _openImageViewer(
-                    networkUrl: imageUrl,
-                    heroTag: heroTag,
-                    title: _car!['name'] ?? 'Foto Mobil',
-                  )
+                      networkUrl: imageUrl,
+                      heroTag: heroTag,
+                      title: _car!['name'] ?? 'Foto Mobil',
+                    )
                 : null,
             child: Hero(
               tag: heroTag,
@@ -757,6 +793,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   : _buildPlaceholderImage(),
             ),
           ),
+          // ⚠️ Overlay gradient — SENGAJA tetap hitam
+          // (di atas FOTO, tidak terkait tema)
           IgnorePointer(
             child: Container(
               decoration: BoxDecoration(
@@ -773,6 +811,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
               ),
             ),
           ),
+          // ⚠️ Back button overlay — SENGAJA tetap hitam/putih
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             left: 16,
@@ -793,6 +832,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
               ),
             ),
           ),
+          // ⚠️ Zoom button overlay — SENGAJA tetap hitam/putih
           if (hasImage)
             Positioned(
               top: MediaQuery.of(context).padding.top + 8,
@@ -818,6 +858,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                 ),
               ),
             ),
+          // ⚠️ Teks di atas foto — SENGAJA tetap putih
           Positioned(
             left: 20,
             right: 20,
@@ -854,14 +895,19 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildPriceCard(String status, dynamic driverPrice) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final statusColor = _getStatusColor(status);
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.08),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -881,7 +927,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       'Harga Sewa / Hari',
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: Colors.grey.shade600,
+                        // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -894,7 +941,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: _primaryColor,
+                          color: _primaryColor, // brand
                         ),
                       ),
                     ),
@@ -905,7 +952,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                 margin: const EdgeInsets.symmetric(horizontal: 14),
                 width: 1,
                 height: 34,
-                color: Colors.grey.shade200,
+                // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+                color: colorScheme.outlineVariant,
               ),
               Expanded(
                 child: Column(
@@ -915,7 +963,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       'Jasa Driver / Hari',
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: Colors.grey.shade600,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -928,7 +976,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: _accentColor,
+                          color: _accentColor, // brand
                         ),
                       ),
                     ),
@@ -941,11 +989,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: _getStatusColor(status).withOpacity(0.1),
+              // 🟢 0.1 → 0.15, 0.3 → 0.4 border
+              color: statusColor.withOpacity(0.15),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: _getStatusColor(status).withOpacity(0.3),
-              ),
+              border: Border.all(color: statusColor.withOpacity(0.4)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -954,7 +1001,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   width: 7,
                   height: 7,
                   decoration: BoxDecoration(
-                    color: _getStatusColor(status),
+                    color: statusColor, // semantic
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -964,7 +1011,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: _getStatusColor(status),
+                    color: statusColor, // semantic
                   ),
                 ),
               ],
@@ -988,6 +1035,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
     double? businessLng,
     bool hasLocation,
   ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _buildHeaderImage()),
@@ -1109,7 +1158,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                     Text(
                       _car!['description'] ?? 'Tidak ada deskripsi tambahan.',
                       style: TextStyle(
-                        color: Colors.grey.shade700,
+                        // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+                        color: colorScheme.onSurfaceVariant,
                         height: 1.5,
                         fontSize: 13.5,
                       ),
@@ -1130,6 +1180,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
     double? lng,
     bool hasLocation,
   ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1141,6 +1193,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
               width: double.infinity,
               child: Stack(
                 children: [
+                  // ⚠️ PETA OSM — tile selalu terang dari server, tetap
                   FlutterMap(
                     mapController: _businessMapController,
                     options: MapOptions(
@@ -1169,7 +1222,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                             height: 40,
                             child: const Icon(
                               Icons.location_pin,
-                              color: Colors.red,
+                              color: Colors.red, // marker merah, tetap
                               size: 40,
                             ),
                           ),
@@ -1177,6 +1230,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       ),
                     ],
                   ),
+                  // ⚠️ Tombol overlay di atas peta — tetap
                   Positioned(
                     top: 8,
                     left: 8,
@@ -1193,7 +1247,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                         _mapActionButton(
                           icon: Icons.alt_route_rounded,
                           label: 'Rute',
-                          backgroundColor: _primaryColor,
+                          backgroundColor: _primaryColor, // brand
                           foregroundColor: Colors.white,
                           onPressed: () => _openDirections(lat, lng),
                         ),
@@ -1289,7 +1343,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
     required VoidCallback onPressed,
   }) {
     return Material(
-      color: Colors.white,
+      color: Colors.white, // di atas peta terang, tetap
       shape: const CircleBorder(),
       elevation: 2,
       child: InkWell(
@@ -1360,6 +1414,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   /// ================= VIDEO SECTION =================
   Widget _buildVideoSection() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     if (_isYoutubeVideo && _youtubeId != null) {
       final thumbnailUrl =
           'https://img.youtube.com/vi/$_youtubeId/hqdefault.jpg';
@@ -1369,10 +1425,9 @@ class _CarDetailPageState extends State<CarDetailPage> {
         child: AspectRatio(
           aspectRatio: 16 / 9,
           child: Material(
-            color: Colors.black,
+            color: Colors.black, // YouTube thumbnail bg, tetap
             child: InkWell(
               onTap: () {
-                // MODAL BOTTOM SHEET DENGAN DESAIN MODERN & ANIMASI HALUS
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
@@ -1383,6 +1438,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                       bottom: MediaQuery.of(context).viewInsets.bottom,
                     ),
                     child: Container(
+                      // ⚠️ Modal YouTube player — tetap hitam (video player)
                       decoration: const BoxDecoration(
                         color: Colors.black,
                         borderRadius: BorderRadius.vertical(
@@ -1407,7 +1463,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                               vertical: 8,
                             ),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text(
                                   'Review Kendaraan',
@@ -1419,9 +1476,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
                                 ),
                                 IconButton(
                                   style: IconButton.styleFrom(
-                                    backgroundColor: Colors.white.withOpacity(
-                                      0.1,
-                                    ),
+                                    backgroundColor:
+                                        Colors.white.withOpacity(0.1),
                                     padding: const EdgeInsets.all(8),
                                   ),
                                   icon: const Icon(
@@ -1437,10 +1493,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
                           const Divider(color: Colors.white12, height: 1),
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: YoutubePopupPlayer(youtubeId: _youtubeId!),
+                            child:
+                                YoutubePopupPlayer(youtubeId: _youtubeId!),
                           ),
                           SizedBox(
-                            height: MediaQuery.of(context).padding.bottom + 16,
+                            height:
+                                MediaQuery.of(context).padding.bottom + 16,
                           ),
                         ],
                       ),
@@ -1473,7 +1531,7 @@ class _CarDetailPageState extends State<CarDetailPage> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: _primaryColor.withOpacity(0.9),
+                        color: _primaryColor.withOpacity(0.9), // brand
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
@@ -1536,7 +1594,8 @@ class _CarDetailPageState extends State<CarDetailPage> {
         aspectRatio: 16 / 9,
         child: Container(
           decoration: BoxDecoration(
-            color: _bgColor,
+            // 🟢 Ganti _bgColor → surfaceContainerHighest
+            color: colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(14),
           ),
           child: Center(
@@ -1551,7 +1610,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
                 const SizedBox(height: 10),
                 Text(
                   'Memuat video...',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -1565,9 +1627,10 @@ class _CarDetailPageState extends State<CarDetailPage> {
         aspectRatio: 16 / 9,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.red.withOpacity(0.05),
+            // 🟢 0.05 → 0.15, 0.15 → 0.30
+            color: colorScheme.error.withOpacity(0.15),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.red.withOpacity(0.15)),
+            border: Border.all(color: colorScheme.error.withOpacity(0.30)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -1575,16 +1638,19 @@ class _CarDetailPageState extends State<CarDetailPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.error_outline_rounded,
-                    color: Colors.red,
+                    color: colorScheme.error,
                     size: 26,
                   ),
                   const SizedBox(height: 8),
                   Text(
                     _videoError!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                    style: TextStyle(
+                      color: colorScheme.error,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -1610,11 +1676,15 @@ class _CarDetailPageState extends State<CarDetailPage> {
 
   /// ================= BOTTOM BAR =================
   Widget _buildBottomBar(String status) {
+    final colorScheme = Theme.of(context).colorScheme;
     final bool available = status == 'tersedia';
+
     return Material(
       elevation: 24,
-      color: Colors.white,
-      shadowColor: Colors.black.withOpacity(0.5),
+      // 🟢 Ganti Colors.white → surface
+      color: colorScheme.surface,
+      // 🟢 Shadow dari tema
+      shadowColor: colorScheme.shadow.withOpacity(0.20),
       child: Container(
         padding: EdgeInsets.fromLTRB(
           16,
@@ -1627,8 +1697,12 @@ class _CarDetailPageState extends State<CarDetailPage> {
           height: 52,
           child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: available ? _primaryColor : Colors.grey.shade400,
-              foregroundColor: Colors.white,
+              // 🟢 Available: brand biru; disabled: surfaceContainerHighest
+              backgroundColor: available
+                  ? _primaryColor
+                  : colorScheme.surfaceContainerHighest,
+              foregroundColor:
+                  available ? Colors.white : colorScheme.onSurfaceVariant,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -1664,20 +1738,25 @@ class _CarDetailPageState extends State<CarDetailPage> {
   }
 
   Widget _buildPlaceholderImage() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: double.infinity,
       height: 300,
-      color: Colors.grey.shade300,
-      child: const Icon(
+      // 🟢 Ganti Colors.grey.shade300 → surfaceContainerHighest
+      color: colorScheme.surfaceContainerHighest,
+      child: Icon(
         Icons.directions_car_rounded,
         size: 64,
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → outline (di atas bg gelap, tetap kelihatan)
+        color: colorScheme.outline,
       ),
     );
   }
 }
 
-/// ================= FULLSCREEN ZOOMABLE IMAGE VIEWER =================
+/// ⚠️ FULLSCREEN ZOOMABLE IMAGE VIEWER — SENGAJA tidak diubah.
+/// Standar UX photo-viewer hitam di kedua mode.
 class _ZoomableImageViewer extends StatefulWidget {
   final String networkUrl;
   final String heroTag;
@@ -1783,7 +1862,8 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
   }
 }
 
-/// ================= YOUTUBE POPUP BOTTOM SHEET PLAYER =================
+/// ⚠️ YOUTUBE POPUP PLAYER — SENGAJA tidak diubah.
+/// Video player hitam-putih standar di kedua mode.
 class YoutubePopupPlayer extends StatefulWidget {
   final String youtubeId;
 
@@ -1797,12 +1877,9 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   late YoutubePlayerController _controller;
   bool _isDisposed = false;
 
-  // 🔧 Guard untuk mencegah feedback loop fullscreen <-> orientasi
   bool? _lastFullScreenState;
   bool _isHandlingFullScreenChange = false;
 
-  // 🔽 TAMBAHAN: melacak posisi tonton real-time, sama seperti
-  //    "currentTime" + setInterval di versi React (web)
   double _currentSeconds = 0;
   Timer? _timeTrackerTimer;
 
@@ -1813,8 +1890,6 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
     _startTimeTracker();
   }
 
-  // 🔽 TAMBAHAN: polling posisi video tiap 1 detik selagi popup terbuka.
-  //    Analog dengan useEffect + setInterval(..., 1000) di CarDetail.tsx
   void _startTimeTracker() {
     _timeTrackerTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (_isDisposed) return;
@@ -1825,14 +1900,10 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
             _currentSeconds = time;
           });
         }
-      } catch (_) {
-        // player belum siap / lagi transisi fullscreen, abaikan saja
-      }
+      } catch (_) {}
     });
   }
 
-  // 🔽 TAMBAHAN: format detik -> "M:SS", sama persis dengan logic di React:
-  //    `${Math.floor(seconds / 60)}:${(Math.floor(seconds % 60)).padStart(2,'0')}`
   String _formatTimestamp(double seconds) {
     final secondsInt = seconds.floor();
     final minutes = secondsInt ~/ 60;
@@ -1841,7 +1912,6 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   }
 
   void _initController() {
-    // Selalu buat instance controller baru yang bersih setiap kali widget dipasang/dibuka
     _controller = YoutubePlayerController.fromVideoId(
       videoId: widget.youtubeId,
       autoPlay: true,
@@ -1855,11 +1925,7 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
 
     _controller.setFullScreenListener((isFullScreen) async {
       if (_isDisposed) return;
-
-      // 1) Abaikan event duplikat/gema dengan value yang sama persis
       if (_lastFullScreenState == isFullScreen) return;
-
-      // 2) Cegah proses tumpang tindih saat transisi sebelumnya masih berjalan
       if (_isHandlingFullScreenChange) return;
 
       _isHandlingFullScreenChange = true;
@@ -1886,8 +1952,6 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
           await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         }
       } finally {
-        // 3) Beri jeda sebelum listener "siap" lagi, supaya gema resize
-        //    dari WebView tidak langsung memicu ulang perubahan orientasi
         await Future.delayed(const Duration(milliseconds: 400));
         if (!_isDisposed) {
           _isHandlingFullScreenChange = false;
@@ -1898,7 +1962,6 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
 
   Future<void> _openInYouTubeApp() async {
     try {
-      // 1) Ambil posisi tonton dulu, SEBELUM player di-pause/di-reset
       double currentSeconds = 0;
       try {
         currentSeconds = await _controller.currentTime;
@@ -1907,21 +1970,16 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
       }
       final int secondsInt = currentSeconds.floor();
 
-      // 2) Pause video supaya WebView tidak terus render/decode di background
       try {
         await _controller.pauseVideo();
       } catch (_) {}
 
-      // 3) Reset orientasi & system UI ke kondisi normal SEBELUM pindah app
-      //    (kalau masih immersive/landscape, YouTube app bisa render blank sesaat)
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
 
-      // 4) PERBAIKAN: Diperpanjang menjadi 300ms agar OS Android benar-benar
-      //    selesai menerapkan perubahan UI/orientasi sebelum app lain dibuka
       await Future.delayed(const Duration(milliseconds: 300));
 
       if (_isDisposed || !mounted) return;
@@ -1956,18 +2014,14 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
   @override
   void dispose() {
     _isDisposed = true;
-    _timeTrackerTimer
-        ?.cancel(); // 🔽 TAMBAHAN: hentikan polling supaya tidak leak
+    _timeTrackerTimer?.cancel();
 
-    // Kembalikan orientasi layar ke portrait terlebih dahulu
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    // PERBAIKAN: Gunakan Future.microtask untuk menutup controller secara aman
-    // agar WebView tidak terpotong mendadak saat animasi tutup bottom sheet berjalan
     Future.microtask(() {
       try {
         _controller.close();
@@ -1995,11 +2049,8 @@ class _YoutubePopupPlayerState extends State<YoutubePopupPlayer> {
           icon: const Icon(
             Icons.open_in_new_rounded,
             size: 16,
-            color: Colors.redAccent,
+            color: Colors.redAccent, // YouTube brand, tetap
           ),
-          // 🔽 UBAH: label sekarang dinamis, menampilkan menit:detik terakhir
-          //    ditonton — sama seperti tombol "Tonton di YouTube (Lanjutkan di M:SS)"
-          //    di versi React.
           label: Text(
             _currentSeconds > 1
                 ? 'Tonton di Aplikasi YouTube (Lanjutkan di ${_formatTimestamp(_currentSeconds)})'

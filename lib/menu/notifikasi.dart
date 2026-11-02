@@ -18,40 +18,30 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  // Tidak lagi bikin WebSocketChannel sendiri. Cukup dengarkan stream
-  // dari service singleton yang sudah hidup sejak login — jadi cuma
-  // ADA SATU koneksi WebSocket untuk seluruh app.
   StreamSubscription<Map<String, dynamic>>? _notifSubscription;
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND & SEMANTIC COLORS (tetap) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
   static const Color _successColor = Color(0xFF16A34A);
   static const Color _dangerColor = Color(0xFFDC2626);
   static const Color _indigoColor = Color(0xFF6366F1);
+  // 🟢 DIHAPUS: _bgColor
 
   @override
   void initState() {
     super.initState();
 
-    // Begitu halaman ini dibuka, badge merah di Navbar langsung padam
-    // secara visual. Ini terpisah dari status "is_read" di backend —
-    // yang itu ditangani & dikonfirmasi lewat _markNotificationsAsRead().
     NotificationSocketService().markAsSeen();
 
     _fetchNotifications();
-    _markNotificationsAsRead(); // Tandai sudah dibaca ke backend (dengan retry)
+    _markNotificationsAsRead();
 
-    // Dengarkan notifikasi baru dari service singleton, bukan bikin
-    // koneksi WebSocket baru.
     _notifSubscription =
         NotificationSocketService().onNewNotification.listen((newNotif) {
       debugPrint(
           'NotifikasiPage: 🔔 notifikasi baru diterima: ${newNotif['title']}');
 
-      // Notifikasi masuk SAAT halaman ini terbuka — badge tetap padam
-      // karena user memang sedang melihat halaman ini secara langsung.
       NotificationSocketService().markAsSeen();
 
       if (!mounted) return;
@@ -63,25 +53,16 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         }
       });
 
-      // 🟢 Notifikasi baru yang masuk saat halaman ini terbuka juga
-      // perlu ditandai read ke backend, supaya tidak numpuk jadi unread
-      // lagi saat halaman dibuka ulang nanti.
       _markNotificationsAsRead();
     });
   }
 
   @override
   void dispose() {
-    // Cukup batalkan LANGGANAN ke stream — tidak menutup koneksi
-    // WebSocket apapun, karena koneksinya memang bukan milik halaman
-    // ini. Koneksi service tetap hidup di background seperti biasa.
     _notifSubscription?.cancel();
     super.dispose();
   }
 
-  /// ================= AMBIL DATA NOTIFIKASI =================
-  /// Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
-  /// benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchNotifications() async {
     setState(() {
       _isLoading = true;
@@ -122,7 +103,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     }
   }
 
-  /// ================= TANDAI SUDAH DIBACA KE BACKEND =================
   Future<void> _markNotificationsAsRead({int attempt = 0}) async {
     try {
       final response = await ApiClient.instance.post(
@@ -130,7 +110,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
       );
 
       if (response.statusCode == 200) {
-        // prefs tetap dipakai di sini untuk flag non-sensitif (bukan token).
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('has_unread_notifications', false);
 
@@ -142,9 +121,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
           });
         }
       } else if (response.statusCode == 401) {
-        // Sesi sudah mati (refresh juga ditolak). onSessionExpired yang
-        // mengurus pindah ke login, jadi tidak perlu di-retry.
-        debugPrint('NotifikasiPage: read-all 401, sesi berakhir, tidak di-retry.');
+        debugPrint(
+            'NotifikasiPage: read-all 401, sesi berakhir, tidak di-retry.');
       } else {
         debugPrint(
             'NotifikasiPage: read-all gagal (${response.statusCode}), attempt=$attempt');
@@ -163,18 +141,16 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
           'NotifikasiPage: read-all menyerah setelah $maxAttempts percobaan.');
       return;
     }
-    final delay = Duration(seconds: 2 * (attempt + 1)); // 2s, 4s, 6s
+    final delay = Duration(seconds: 2 * (attempt + 1));
     Timer(delay, () {
       if (mounted) _markNotificationsAsRead(attempt: attempt + 1);
     });
   }
 
-  /// ================= 🟢 HAPUS SATU NOTIFIKASI =================
   Future<void> _deleteSingleNotification(int index) async {
     final deletedNotif = _notifications[index];
     final notifId = deletedNotif['id'];
 
-    // 1. Optimistic UI update: Hapus dulu dari tampilan agar terasa cepat
     setState(() {
       _notifications.removeAt(index);
     });
@@ -185,7 +161,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
       );
 
       if (response.statusCode != 200) {
-        // Jika gagal, kembalikan data ke dalam list
         if (!mounted) return;
         setState(() {
           _notifications.insert(index, deletedNotif);
@@ -193,7 +168,6 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         _showSnackBar('Gagal menghapus notifikasi.');
       }
     } catch (e) {
-      // Jika error koneksi, kembalikan data ke dalam list
       if (!mounted) return;
       setState(() {
         _notifications.insert(index, deletedNotif);
@@ -202,27 +176,43 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     }
   }
 
-  /// ================= 🟢 HAPUS SEMUA NOTIFIKASI =================
   Future<void> _clearAllNotifications() async {
-    // Tampilkan dialog konfirmasi
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Hapus Semua Notifikasi?', 
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        content: const Text('Tindakan ini tidak dapat dibatalkan.'),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Batal', style: TextStyle(color: Colors.grey.shade600)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Hapus', style: TextStyle(color: _dangerColor, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+      builder: (context) {
+        // 🟢 Ambil token tema dari context dialog
+        final colorScheme = Theme.of(context).colorScheme;
+
+        return AlertDialog(
+          title: const Text('Hapus Semua Notifikasi?',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          content: const Text('Tindakan ini tidak dapat dibatalkan.'),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(
+                'Batal',
+                style: TextStyle(
+                  // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Hapus',
+                style: TextStyle(
+                  color: _dangerColor, // semantic error
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirm != true) return;
@@ -247,7 +237,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
         _showSnackBar('Semua notifikasi berhasil dibersihkan.');
       } else {
         setState(() => _isLoading = false);
-        _showSnackBar('Gagal menghapus notifikasi (Kode: ${response.statusCode})');
+        _showSnackBar(
+            'Gagal menghapus notifikasi (Kode: ${response.statusCode})');
       }
     } catch (e) {
       if (!mounted) return;
@@ -282,6 +273,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
     }
   }
 
+  // 🟢 Warna semantic per jenis notifikasi — tetap di kedua mode
   Color _getNotifColor(String? type) {
     switch (type) {
       case 'booking':
@@ -325,34 +317,38 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor
       appBar: AppBar(
         title: const Text(
           'Notifikasi Aktivitas',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: false,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1E293B),
+        // 🟢 AppBar pakai token tema
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: colorScheme.surface,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey.shade200),
+          child: Container(height: 1, color: colorScheme.outlineVariant),
         ),
-        // 🟢 TAMBAHAN: Tombol Hapus Semua di pojok kanan atas
         actions: [
           if (_notifications.isNotEmpty && !_isLoading)
             IconButton(
-              icon: const Icon(Icons.delete_sweep_rounded, color: _dangerColor),
+              icon: const Icon(Icons.delete_sweep_rounded,
+                  color: _dangerColor), // semantic, tetap
               tooltip: 'Bersihkan Semua',
               onPressed: _clearAllNotifications,
             ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
+          ? const Center(
+              child: CircularProgressIndicator(color: _primaryColor))
           : _errorMessage != null
               ? _buildErrorState()
               : _notifications.isEmpty
@@ -366,8 +362,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                         itemBuilder: (context, index) {
                           final notif = _notifications[index];
-                          
-                          // 🟢 TAMBAHAN: Dibungkus Dismissible agar bisa di-swipe untuk hapus
+
                           return Dismissible(
                             key: Key('notif_${notif['id']}'),
                             direction: DismissDirection.endToStart,
@@ -377,14 +372,16 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                             background: Container(
                               margin: const EdgeInsets.only(bottom: 10),
                               decoration: BoxDecoration(
+                                // 🟢 Merah semantic (destruktif) — tetap
                                 color: _dangerColor,
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.symmetric(horizontal: 24),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 24),
                               child: const Icon(
                                 Icons.delete_outline_rounded,
-                                color: Colors.white,
+                                color: Colors.white, // di atas merah, tetap
                                 size: 28,
                               ),
                             ),
@@ -398,6 +395,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
 
   /// ================= STATE: ERROR =================
   Widget _buildErrorState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -407,7 +406,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: _dangerColor.withOpacity(0.08),
+                // 🟢 0.08 → 0.15, biar tetap kelihatan di dark
+                color: _dangerColor.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.error_outline_rounded,
@@ -417,7 +417,11 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
             Text(
               _errorMessage!,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              style: TextStyle(
+                // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
@@ -425,7 +429,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Coba Lagi'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryColor,
+                backgroundColor: _primaryColor, // brand
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
@@ -442,6 +446,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
 
   /// ================= STATE: EMPTY =================
   Widget _buildEmptyState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         return SingleChildScrollView(
@@ -455,22 +461,35 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                   Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: _primaryColor.withOpacity(0.08),
+                      // 🟢 0.08 → 0.15
+                      color: _primaryColor.withOpacity(0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(Icons.notifications_off_outlined,
-                        size: 40, color: _primaryColor.withOpacity(0.6)),
+                    child: Icon(
+                      Icons.notifications_off_outlined,
+                      size: 40,
+                      // 🟢 _primaryColor.withOpacity(0.6) tetap — brand
+                      color: _primaryColor.withOpacity(0.6),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text(
                     'Belum ada notifikasi kejadian.',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                    style: TextStyle(
+                      // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Aktivitas terbaru seputar pesanan Anda akan\nmuncul di sini.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                    style: TextStyle(
+                      // 🟢 Ganti Colors.grey.shade400 → outline
+                      color: colorScheme.outline,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -483,22 +502,33 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
 
   /// ================= KARTU NOTIFIKASI =================
   Widget _buildNotifCard(dynamic notif) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bool isDark = theme.brightness == Brightness.dark;
+
     final String? type = notif['type'];
     final Color notifColor = _getNotifColor(type);
     final bool isUnread = notif['is_read'] == false;
     final String createdAt = notif['created_at']?.toString() ?? '';
 
+    // 🟢 Unread bg: light 0.045 (asli), dark 0.15 (biar kelihatan tint biru)
+    final Color cardBg = isUnread
+        ? _primaryColor.withOpacity(isDark ? 0.15 : 0.045)
+        : colorScheme.surface;
+
+    // 🟢 Unread border: light 0.15, dark 0.30
+    final Color unreadBorder = _primaryColor.withOpacity(isDark ? 0.30 : 0.15);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: isUnread ? _primaryColor.withOpacity(0.045) : Colors.white,
+        color: cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: isUnread
-            ? Border.all(color: _primaryColor.withOpacity(0.15))
-            : null,
+        border: isUnread ? Border.all(color: unreadBorder) : null,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -512,7 +542,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: notifColor.withOpacity(0.1),
+                // 🟢 0.1 → 0.15, tetap kelihatan di dark
+                color: notifColor.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
               child: Icon(_getNotifIcon(type), color: notifColor, size: 20),
@@ -532,7 +563,8 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                             fontWeight:
                                 isUnread ? FontWeight.bold : FontWeight.w600,
                             fontSize: 13.5,
-                            color: const Color(0xFF1E293B),
+                            // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                            color: colorScheme.onSurface,
                           ),
                         ),
                       ),
@@ -543,6 +575,7 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                           height: 8,
                           margin: const EdgeInsets.only(top: 4),
                           decoration: const BoxDecoration(
+                            // 🟢 Oranye brand — tetap di kedua mode
                             color: _accentColor,
                             shape: BoxShape.circle,
                           ),
@@ -555,15 +588,20 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                     notif['message'] ?? '',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey.shade600,
+                      // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                      color: colorScheme.onSurfaceVariant,
                       height: 1.4,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.schedule_rounded,
-                          size: 11.5, color: Colors.grey.shade400),
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 11.5,
+                        // 🟢 Ganti Colors.grey.shade400 → outline
+                        color: colorScheme.outline,
+                      ),
                       const SizedBox(width: 3),
                       Text(
                         [
@@ -572,7 +610,10 @@ class _NotifikasiPageState extends State<NotifikasiPage> {
                             _formatTime(createdAt),
                         ].where((e) => e.isNotEmpty).join(' • '),
                         style: TextStyle(
-                            fontSize: 10.5, color: Colors.grey.shade500),
+                          fontSize: 10.5,
+                          // 🟢 Ganti Colors.grey.shade500 → outline
+                          color: colorScheme.outline,
+                        ),
                       ),
                     ],
                   ),

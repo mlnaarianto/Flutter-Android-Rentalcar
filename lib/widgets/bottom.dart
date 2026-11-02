@@ -8,19 +8,14 @@ import 'package:rentalcar/menu/profil.dart';
 import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/menu/car.dart';
 import 'package:rentalcar/menu/booking_history_page.dart';
-import 'package:rentalcar/menu/rental_application_page.dart'; // Halaman Pengajuan Perental
+import 'package:rentalcar/menu/rental_application_page.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart';
-import 'package:rentalcar/services/notification_socket_service.dart'; // hapus token FCM saat logout
-import 'package:rentalcar/services/api_client.dart'; // 🟢 FASE 4: POST /logout lewat ApiClient
-import 'package:rentalcar/services/token_storage.dart'; // 🟢 FASE 4: cek & hapus sesi
-import 'package:rentalcar/utils/navigation_service.dart'; // 🟢 FASE 4: navigatorKey global
-import 'package:rentalcar/utils/user_prefs.dart'; // 🟢 daftar key prefs bersama (userPrefsKeys)
-
-// 🟢 DIPINDAH: daftar key prefs milik user sekarang ada di
-// lib/utils/user_prefs.dart (userPrefsKeys), dipakai bersama dengan main.dart.
-// 'fcm_device_id' SENGAJA tidak ada di daftar itu karena itu identitas
-// device, bukan data user.
+import 'package:rentalcar/services/notification_socket_service.dart';
+import 'package:rentalcar/services/api_client.dart';
+import 'package:rentalcar/services/token_storage.dart';
+import 'package:rentalcar/utils/navigation_service.dart';
+import 'package:rentalcar/utils/user_prefs.dart';
 
 class Bottom extends StatefulWidget {
   final int currentIndex;
@@ -36,7 +31,7 @@ class _BottomState extends State<Bottom> {
   String? _avatarUrl;
   String? _userRole;
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND COLOR (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
 
   @override
@@ -60,33 +55,13 @@ class _BottomState extends State<Bottom> {
   }
 
   /// ================== PROSES LOGOUT ==================
-  ///
-  /// 🟢 FASE 4. Urutan:
-  ///   1. (kalau sesi masih ada) removeFcmToken, lalu POST /logout
-  ///   2. disconnect WS
-  ///   3. TokenStorage.clear()
-  ///   4. bersihkan prefs
-  ///   5. GoogleSignIn.signOut()
-  ///   6. ke LoginPage
-  ///
-  /// Langkah 2-5 ada di blok `finally`, jadi tetap jalan walau server
-  /// error / timeout / jaringan putus. Logout lokal TIDAK boleh gagal
-  /// hanya karena server tidak terjangkau.
-  ///
-  /// Kalau sesi sudah mati dari awal, langkah 1 dilewati.
-  ///
-  /// Kalau refresh token ternyata mati SAAT langkah 1, ApiClient memicu
-  /// onSessionExpired (main.dart) yang sudah membersihkan semuanya dan
-  /// pindah ke LoginPage. Kita deteksi itu lewat hasSession() dan tidak
-  /// navigasi lagi, supaya LoginPage tidak ditumpuk dua kali.
+  /// Tidak diubah sama sekali — 100% logika lama.
   Future<void> _performLogout() async {
     bool handledByExpiredCallback = false;
 
     try {
       if (await TokenStorage.hasSession()) {
         try {
-          // Hapus token FCM DULU, selagi sesi masih valid -- endpoint-nya
-          // butuh Authorization. Timeout supaya logout tidak menggantung.
           await NotificationSocketService()
               .removeFcmToken()
               .timeout(const Duration(seconds: 10));
@@ -95,20 +70,14 @@ class _BottomState extends State<Bottom> {
               .post(Uri.parse(ApiConfig.logout))
               .timeout(const Duration(seconds: 10));
         } catch (e) {
-          // Jaringan putus / timeout / dll: abaikan, lanjut logout lokal.
           debugPrint('Logout: panggilan server gagal, lanjut logout lokal: $e');
         }
 
-        // Kalau sesi hilang selama panggilan di atas (refresh membalas 401),
-        // berarti onSessionExpired sudah menangani semuanya, termasuk
-        // navigasi ke LoginPage.
         handledByExpiredCallback = !await TokenStorage.hasSession();
       } else {
         debugPrint('Logout: sesi sudah tidak ada, langsung logout lokal.');
       }
     } finally {
-      // Setiap langkah dibungkus try sendiri supaya satu kegagalan tidak
-      // menghentikan langkah berikutnya.
       try {
         NotificationSocketService().disconnect();
       } catch (e) {
@@ -137,8 +106,6 @@ class _BottomState extends State<Bottom> {
       }
     }
 
-    // Pakai navigatorKey (bukan context) karena widget ini bisa saja sudah
-    // di-dispose saat sampai di sini.
     if (!handledByExpiredCallback) {
       navigatorKey.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -151,45 +118,59 @@ class _BottomState extends State<Bottom> {
   Future<void> _confirmLogout(BuildContext context) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(9),
+      builder: (dialogContext) {
+        // 🟢 Ambil token tema dari dialogContext (punya akses ke theme)
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  // 🟢 error dengan opacity: merah di light, merah terang di dark
+                  color: colorScheme.error.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(Icons.logout_rounded,
+                    size: 18, color: colorScheme.error),
               ),
-              child: const Icon(Icons.logout_rounded, size: 18, color: Colors.red),
+              const SizedBox(width: 10),
+              const Text('Logout',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Text(
+            'Apakah kamu yakin ingin mengakhiri sesi ini?',
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 13.5,
             ),
-            const SizedBox(width: 10),
-            const Text('Logout',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text('Batal',
+                  style: TextStyle(color: colorScheme.onSurfaceVariant)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                // 🟢 Pakai error/onError: kontras terjamin di kedua mode
+                backgroundColor: colorScheme.error,
+                foregroundColor: colorScheme.onError,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Ya, Logout'),
+            ),
           ],
-        ),
-        content: Text(
-          'Apakah kamu yakin ingin mengakhiri sesi ini?',
-          style: TextStyle(color: Colors.grey.shade600, fontSize: 13.5),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text('Batal', style: TextStyle(color: Colors.grey.shade700)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Ya, Logout'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (result == true) {
@@ -203,34 +184,39 @@ class _BottomState extends State<Bottom> {
       context: parentContext,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
+        // 🟢 Ambil token tema dari sheetContext
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+
         return SafeArea(
           child: Container(
             margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              // 🟢 surface: light = putih, dark = abu gelap
+              color: colorScheme.surface,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: 10),
-                // Drag handle, biar keliatan ini bottom sheet yang bisa ditutup
+                // Drag handle
                 Container(
                   width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
+                    // 🟢 outlineVariant: abu sesuai mode
+                    color: colorScheme.outlineVariant,
                     borderRadius: BorderRadius.circular(20),
                   ),
                 ),
                 const SizedBox(height: 12),
                 _profileMenuTile(
                   icon: Icons.store_mall_directory_rounded,
-                  iconColor: _primaryColor,
+                  iconColor: _primaryColor, // brand
                   title: 'Pengajuan Perental',
                   subtitle: 'Daftar jadi partner rental mobil',
                   onTap: () {
-                    Navigator.pop(sheetContext); // Tutup bottom sheet
+                    Navigator.pop(sheetContext);
                     Navigator.push(
                       parentContext,
                       MaterialPageRoute(
@@ -239,13 +225,19 @@ class _BottomState extends State<Bottom> {
                     );
                   },
                 ),
-                Divider(height: 1, color: Colors.grey.shade100, indent: 16, endIndent: 16),
+                Divider(
+                  height: 1,
+                  // 🟢 outlineVariant, bukan grey.shade100
+                  color: colorScheme.outlineVariant,
+                  indent: 16,
+                  endIndent: 16,
+                ),
                 _profileMenuTile(
                   icon: Icons.logout_rounded,
-                  iconColor: Colors.red,
+                  iconColor: colorScheme.error,
                   title: 'Logout',
                   subtitle: 'Keluar dari akun ini',
-                  titleColor: Colors.red,
+                  titleColor: colorScheme.error,
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _confirmLogout(parentContext);
@@ -268,6 +260,8 @@ class _BottomState extends State<Bottom> {
     required VoidCallback onTap,
     Color? titleColor,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -279,7 +273,8 @@ class _BottomState extends State<Bottom> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.12 (sedikit lebih kuat biar kelihatan di dark)
+                  color: iconColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(icon, color: iconColor, size: 20),
@@ -294,13 +289,18 @@ class _BottomState extends State<Bottom> {
                       style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w600,
-                        color: titleColor ?? const Color(0xFF1E293B),
+                        // 🟢 titleColor (untuk logout = error), default onSurface
+                        color: titleColor ?? colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 1),
                     Text(
                       subtitle,
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade500),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -315,6 +315,7 @@ class _BottomState extends State<Bottom> {
   /// ================== WIDGET AVATAR ==================
   Widget _buildAvatar() {
     final bool isActive = widget.currentIndex == 3;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -324,13 +325,15 @@ class _BottomState extends State<Bottom> {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
+              // 🟢 _primaryColor = brand, tetap sama di light & dark
               color: isActive ? _primaryColor : Colors.transparent,
               width: 1.6,
             ),
           ),
           child: CircleAvatar(
             radius: 12,
-            backgroundColor: Colors.grey.shade200,
+            // 🟢 surfaceContainerHighest: light = abu terang, dark = abu gelap
+            backgroundColor: colorScheme.surfaceContainerHighest,
             backgroundImage: (_avatarUrl != null && _avatarUrl!.isNotEmpty)
                 ? NetworkImage(_avatarUrl!) as ImageProvider
                 : const AssetImage('assets/anya.jpg'),
@@ -343,11 +346,18 @@ class _BottomState extends State<Bottom> {
           child: Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              // 🟢 Sama dengan latar navbar supaya "menyatu"
+              color: colorScheme.surface,
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 1.2),
+              // 🟢 Border pakai surface lagi (efek "ring" tipis)
+              border: Border.all(color: colorScheme.surface, width: 1.2),
             ),
-            child: Icon(Icons.more_horiz_rounded, size: 10, color: Colors.grey.shade600),
+            child: Icon(
+              Icons.more_horiz_rounded,
+              size: 10,
+              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ],
@@ -357,12 +367,16 @@ class _BottomState extends State<Bottom> {
   /// ================== BUILD ==================
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 surface: light = putih, dark = abu gelap
+        color: colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            // 🟢 shadow dari tema (tidak hitam pekat di dark mode)
+            color: colorScheme.shadow.withOpacity(0.08),
             blurRadius: 12,
             offset: const Offset(0, -3),
           ),
@@ -378,12 +392,17 @@ class _BottomState extends State<Bottom> {
               child: BottomNavigationBar(
                 currentIndex: widget.currentIndex,
                 type: BottomNavigationBarType.fixed,
-                backgroundColor: Colors.white,
+                // 🟢 Ikut tema Container di atas
+                backgroundColor: colorScheme.surface,
                 elevation: 0,
+                // 🟢 _primaryColor tetap — brand, kontras di kedua mode
                 selectedItemColor: _primaryColor,
-                unselectedItemColor: Colors.grey.shade400,
-                selectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+                // 🟢 onSurfaceVariant: abu redup, terbaca di light & dark
+                unselectedItemColor: colorScheme.onSurfaceVariant,
+                selectedLabelStyle: const TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.bold),
+                unselectedLabelStyle: const TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w500),
                 onTap: (index) {
                   if (index == 0) {
                     Navigator.pushAndRemoveUntil(
@@ -399,7 +418,8 @@ class _BottomState extends State<Bottom> {
                   } else if (index == 2) {
                     Navigator.pushReplacement(
                       context,
-                      MaterialPageRoute(builder: (_) => const BookingHistoryPage()),
+                      MaterialPageRoute(
+                          builder: (_) => const BookingHistoryPage()),
                     );
                   } else if (index == 3) {
                     Navigator.push(
@@ -439,7 +459,11 @@ class _BottomState extends State<Bottom> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
                 'Tahan lama foto profil untuk menu lainnya',
-                style: TextStyle(fontSize: 9.5, color: Colors.grey.shade400),
+                style: TextStyle(
+                  fontSize: 9.5,
+                  // 🟢 Ganti Colors.grey.shade400 → outline
+                  color: colorScheme.outline,
+                ),
               ),
             ),
           ],

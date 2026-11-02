@@ -7,6 +7,7 @@ import 'package:rentalcar/menu/rentals_booking_page.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/menu/driver_bookings_page.dart';
 import 'package:rentalcar/enums/app_enums.dart';
+import 'package:rentalcar/utils/theme_controller.dart'; // 🟢 TAMBAHAN
 
 class Sidebar extends StatefulWidget {
   final String userName;
@@ -39,10 +40,10 @@ class _SidebarState extends State<Sidebar> {
   // Tag unik untuk animasi Hero avatar sidebar -> fullscreen viewer
   static const String _avatarHeroTag = 'sidebar-user-avatar';
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 DIHAPUS: _bgColor — Drawer sekarang pakai colorScheme.surface
 
   @override
   void initState() {
@@ -64,28 +65,19 @@ class _SidebarState extends State<Sidebar> {
       _userId = prefs.getString('user_id');
     });
 
-    // Dipisah dari setState di atas karena butuh 'await' network call --
-    // tidak masalah dipanggil setelah _userId di-set, keduanya independen.
     await _loadSupportAgentId();
   }
 
   /// ================= AMBIL ID ADMIN/CS SECARA DINAMIS =================
-  /// Panggil GET /api/support-agent sekali saat Sidebar dibuka. Endpoint
-  /// ini di backend query user berdasarkan Permission::ReceiveSupportChat,
-  /// jadi kalau admin CS dipindah/diganti lewat Filament, aplikasi ini
-  /// otomatis ikut tanpa perlu update kode atau rilis ulang.
-  ///
-  /// Token dipasang dan di-refresh otomatis oleh ApiClient, jadi tidak
-  /// perlu membaca token dari prefs lagi di sini.
+  /// Panggil GET /api/support-agent sekali saat Sidebar dibuka.
   ///
   /// Kalau gagal (network error, 404 karena permission belum di-assign ke
   /// siapa pun, dsb), _supportAgentId dibiarkan null dan _openAdminChat()
-  /// akan pakai fallback '1' -- supaya menu Chat Admin tidak ikut rusak
-  /// hanya karena endpoint ini belum siap.
+  /// akan pakai fallback '1'.
   Future<void> _loadSupportAgentId() async {
     try {
       final response = await ApiClient.instance.get(
-        Uri.parse(ApiConfig.supportAgent), // 🟢 DIUBAH: sebelumnya '${ApiConfig.baseUrl}/support-agent'
+        Uri.parse(ApiConfig.supportAgent),
       );
 
       if (response.statusCode != 200) return;
@@ -104,29 +96,16 @@ class _SidebarState extends State<Sidebar> {
   }
 
   /// ================= FIX FOTO GOOGLE BURAM/PIXELATED =================
-  /// Kalau foto profil berasal dari Google Sign-In, URL-nya biasanya sudah
-  /// dibatasi ukurannya kecil (mis. diakhiri "=s96-c" -> cuma 96x96px).
-  /// Di avatar kecil di header sidebar ini tidak kelihatan, tapi begitu
-  /// di-stretch ke viewer fullscreen jadi buram/pecah. Solusinya: ganti
-  /// angka ukuran di URL-nya jadi lebih besar sebelum dipakai untuk viewer
-  /// full-screen. Sama persis dengan yang dipakai di ProfilPage & ChatPage.
   String? _hiResAvatarUrl(String? url, {int size = 720}) {
     if (url == null || url.isEmpty) return url;
     final sizePattern = RegExp(r'=s\d+-c(-[a-z0-9]+)?$');
     if (sizePattern.hasMatch(url)) {
       return url.replaceAll(sizePattern, '=s$size-c');
     }
-    // Kalau backend sudah menyimpan ulang foto ini sendiri (bukan link
-    // langsung dari Google), parameter ukuran ini tidak akan ada, berarti
-    // sumber resolusi rendahnya ada di sisi server, bukan di aplikasi ini.
     return url;
   }
 
   /// ================= BUKA FOTO PROFIL SECARA FULLSCREEN =================
-  /// Ketuk avatar di header sidebar -> layar hitam + foto besar dengan
-  /// pinch-to-zoom & double-tap zoom. Hanya aktif kalau ada foto asli dari
-  /// server (bukan foto default assets/anya.jpg), karena tidak ada gunanya
-  /// nge-zoom gambar placeholder.
   void _openAvatarViewer() {
     if (_avatarUrl == null || _avatarUrl!.isEmpty) return;
 
@@ -153,9 +132,6 @@ class _SidebarState extends State<Sidebar> {
   }
 
   /// ================= BUKA HALAMAN CHAT ADMIN =================
-  /// Dipisah dari onTap langsung supaya bisa di-guard: kalau _userId belum
-  /// sempat ke-load dari SharedPreferences, jangan kirim user ke ChatPage
-  /// dengan identitas kosong/salah -- beri tahu user untuk coba lagi.
   Future<void> _openAdminChat(BuildContext context) async {
     if (_userId == null || _userId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -167,7 +143,6 @@ class _SidebarState extends State<Sidebar> {
     }
 
     Navigator.pop(context);
-
     if (!context.mounted) return;
 
     final String uniqueChatId =
@@ -180,9 +155,6 @@ class _SidebarState extends State<Sidebar> {
           chatId: uniqueChatId,
           currentUserId: _userId!,
           currentUserName: widget.userName,
-          // 🟢 FIX: sebelumnya hardcode '1'. Sekarang pakai _supportAgentId
-          // hasil fetch dari /api/support-agent, dengan fallback ke '1'
-          // kalau fetch belum selesai / gagal -- lihat _loadSupportAgentId().
           receiverId: _supportAgentId ?? '1',
           receiverName: "Admin Rental (CS)",
         ),
@@ -192,12 +164,13 @@ class _SidebarState extends State<Sidebar> {
 
   /// ================= HELPER UI: JUDUL SECTION =================
   Widget _sectionLabel(String text) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
       child: Text(
         text,
         style: TextStyle(
-          color: Colors.grey.shade500,
+          color: colorScheme.onSurfaceVariant,
           fontSize: 11.5,
           fontWeight: FontWeight.bold,
           letterSpacing: 0.6,
@@ -214,6 +187,8 @@ class _SidebarState extends State<Sidebar> {
     String? subtitle,
     required VoidCallback onTap,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Material(
@@ -229,7 +204,7 @@ class _SidebarState extends State<Sidebar> {
                 Container(
                   padding: const EdgeInsets.all(9),
                   decoration: BoxDecoration(
-                    color: iconColor.withOpacity(0.1),
+                    color: iconColor.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(11),
                   ),
                   child: Icon(icon, color: iconColor, size: 19),
@@ -241,10 +216,10 @@ class _SidebarState extends State<Sidebar> {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
+                          color: colorScheme.onSurface,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF1E293B),
                         ),
                       ),
                       if (subtitle != null)
@@ -253,16 +228,19 @@ class _SidebarState extends State<Sidebar> {
                           child: Text(
                             subtitle,
                             style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
                               fontSize: 11.5,
-                              color: Colors.grey.shade500,
                             ),
                           ),
                         ),
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded,
-                    size: 18, color: Colors.grey.shade400),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: colorScheme.outline,
+                ),
               ],
             ),
           ),
@@ -273,17 +251,22 @@ class _SidebarState extends State<Sidebar> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     final List<String> rolesList =
         widget.userRoles.map((role) => role.toString()).toList();
 
     final bool hasAvatar = _avatarUrl != null && _avatarUrl!.isNotEmpty;
 
     return Drawer(
-      backgroundColor: _bgColor,
+      backgroundColor: colorScheme.surface,
       child: SafeArea(
         child: Column(
           children: [
             // ================= HEADER PROFIL =================
+            // ⚠️ ZONA BIRU: semua warna di dalamnya SENGAJA tidak diubah.
+            // Latar gradient selalu biru, teks putih, border ring putih —
+            // kontras sama di light maupun dark.
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
@@ -305,21 +288,19 @@ class _SidebarState extends State<Sidebar> {
                           padding: const EdgeInsets.all(3),
                           decoration: const BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Colors.white,
+                            color: Colors.white, // ring putih di atas gradient biru
                           ),
                           child: Hero(
                             tag: _avatarHeroTag,
                             child: CircleAvatar(
                               radius: 26,
-                              backgroundColor: Colors.blue.withOpacity(0.08),
+                              backgroundColor: Colors.white.withOpacity(0.15),
                               backgroundImage: hasAvatar
                                   ? NetworkImage(_avatarUrl!) as ImageProvider
                                   : const AssetImage("assets/anya.jpg"),
                             ),
                           ),
                         ),
-                        // Indikator kecil "bisa di-zoom", hanya muncul kalau
-                        // ada foto asli (bukan foto default).
                         if (hasAvatar)
                           Positioned(
                             right: 0,
@@ -329,7 +310,8 @@ class _SidebarState extends State<Sidebar> {
                               decoration: BoxDecoration(
                                 color: _primaryColor,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 1.5),
+                                border: Border.all(
+                                    color: Colors.white, width: 1.5),
                               ),
                               child: const Icon(
                                 Icons.zoom_in_rounded,
@@ -383,8 +365,7 @@ class _SidebarState extends State<Sidebar> {
                                         borderRadius:
                                             BorderRadius.circular(20),
                                         border: Border.all(
-                                          color:
-                                              Colors.white.withOpacity(0.3),
+                                          color: Colors.white.withOpacity(0.3),
                                         ),
                                       ),
                                       child: Text(
@@ -445,7 +426,7 @@ class _SidebarState extends State<Sidebar> {
                     _sectionLabel('MENU DRIVER'),
                     _menuItem(
                       icon: Icons.directions_car_filled_rounded,
-                      iconColor: const Color(0xFF7C3AED),
+                      iconColor: const Color(0xFF7C3AED), // ungu brand
                       title: 'Tugas Penugasan',
                       subtitle: 'Lihat jadwal & tugas antar-jemput',
                       onTap: () {
@@ -481,9 +462,84 @@ class _SidebarState extends State<Sidebar> {
                     ),
                   ],
 
-                  // Menu "ADMINISTRATOR" (Manajemen User) sudah dihapus --
-                  // sebelumnya cuma memanggil Navigator.pop(context) tanpa
-                  // tujuan nyata (belum ada halamannya).
+                  // ================= TAMPILAN =================
+                  // 🟢 TAMBAHAN: section toggle tema
+                  const Divider(height: 24),
+                  _sectionLabel('TAMPILAN'),
+                  ValueListenableBuilder<ThemeMode>(
+                    valueListenable: ThemeController.notifier,
+                    builder: (context, mode, _) {
+                      // 🟢 Kalau mode masih "system", baca brightness OS
+                      // supaya status switch mencerminkan kondisi nyata
+                      // (bukan selalu tampil "off" padahal HP sedang dark).
+                      final isDark = mode == ThemeMode.dark ||
+                          (mode == ThemeMode.system &&
+                              MediaQuery.platformBrightnessOf(context) ==
+                                  Brightness.dark);
+
+                      return SwitchListTile(
+                        title: Text(
+                          'Mode Gelap',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
+                        subtitle: Text(
+                          isDark ? 'Aktif' : 'Nonaktif',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        secondary: Icon(
+                          isDark
+                              ? Icons.dark_mode_rounded
+                              : Icons.light_mode_rounded,
+                          color: isDark
+                              ? _primaryColor
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                        value: isDark,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 20),
+                        onChanged: (value) {
+                          // 🟢 Set eksplisit ke light/dark.
+                          // Setelah ini, mode tidak lagi "system" —
+                          // user sudah override manual, pilihannya
+                          // disimpan permanen oleh ThemeController.
+                          ThemeController.set(
+                            value ? ThemeMode.dark : ThemeMode.light,
+                          );
+                        },
+                      );
+                    },
+                  ),
+
+                  // 🟢 OPSIONAL: tombol balik ke "Ikuti Sistem".
+                  // Hanya muncul kalau user sudah pernah override manual,
+                  // jadi user baru tidak bingung.
+                  ValueListenableBuilder<ThemeMode>(
+                    valueListenable: ThemeController.notifier,
+                    builder: (context, mode, _) {
+                      if (mode != ThemeMode.system) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                          child: TextButton.icon(
+                            onPressed: () =>
+                                ThemeController.set(ThemeMode.system),
+                            icon: const Icon(Icons.brightness_auto, size: 16),
+                            label: const Text(
+                              'Ikuti Pengaturan Sistem',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
                 ],
               ),
             ),
@@ -494,7 +550,7 @@ class _SidebarState extends State<Sidebar> {
               padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(
                 border: Border(
-                  top: BorderSide(color: Colors.grey.shade200),
+                  top: BorderSide(color: colorScheme.outlineVariant),
                 ),
               ),
               child: Center(
@@ -502,7 +558,7 @@ class _SidebarState extends State<Sidebar> {
                   'RentalCar App',
                   style: TextStyle(
                     fontSize: 11,
-                    color: Colors.grey.shade400,
+                    color: colorScheme.outline,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -515,10 +571,9 @@ class _SidebarState extends State<Sidebar> {
   }
 }
 
-/// ================= FULLSCREEN ZOOMABLE IMAGE VIEWER =================
-/// Pola yang sama dengan _ZoomableImageViewer di ProfilPage / CarDetailPage /
-/// ChatPage: pinch-to-zoom, drag, dan double-tap untuk zoom in/out. Khusus
-/// untuk gambar dari network (foto profil user selalu berasal dari server).
+/// ⚠️ FULLSCREEN ZOOMABLE IMAGE VIEWER — SENGAJA tidak diubah.
+/// Latar hitam & teks putih adalah standar UX photo-viewer
+/// di kedua mode terang maupun gelap.
 class _ZoomableImageViewer extends StatefulWidget {
   final String networkUrl;
   final String heroTag;
@@ -586,7 +641,8 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
         backgroundColor: Colors.black,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text(widget.title,
+            style: const TextStyle(color: Colors.white, fontSize: 16)),
       ),
       body: GestureDetector(
         onDoubleTapDown: (details) => _doubleTapDetails = details,

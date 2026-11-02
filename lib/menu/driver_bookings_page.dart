@@ -20,10 +20,10 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
   String? _currentUserId;
   String? _currentUserName;
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 DIHAPUS: _bgColor
 
   @override
   void initState() {
@@ -32,16 +32,11 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     _fetchDriverBookings();
   }
 
-  // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
   String _formatDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return '-';
     return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
   }
 
-  // Ambil data user aktif (driver) dari SharedPreferences.
-  // Sudah benar tanpa fallback ID palsu (mis. '3') -- default-nya string
-  // kosong, dan _openChatWithRentalOwner() di bawah di-guard secara
-  // eksplisit sebelum membuka ChatPage.
   Future<void> _loadLocalUserData() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
@@ -52,10 +47,6 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     });
   }
 
-  // Ambil daftar tugas booking khusus untuk driver yang sedang login.
-  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
-  // benar-benar mati (refresh token ditolak), onSessionExpired di main.dart
-  // yang mengarahkan user ke LoginPage.
   Future<void> _fetchDriverBookings() async {
     setState(() {
       _isLoading = true;
@@ -95,17 +86,10 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     }
   }
 
-  // Navigasi ke Halaman Chat Driver <-> Perental (Pemilik Rental).
-  //
-  // Guard _currentUserId ditambahkan di awal: sebelumnya kalau fungsi ini
-  // sempat dipanggil sebelum _loadLocalUserData() selesai (_currentUserId
-  // masih null/kosong), ChatPage tetap dibuka dengan currentUserId kosong.
-  // Akibatnya uniqueChatId jadi berakhiran kosong ("..._driver_") dan,
-  // yang lebih penting, ChatPage memakai currentUserId itu untuk menentukan
-  // bubble chat mana yang "milik saya" -- kalau kosong, bisa salah tampil.
   void _openChatWithRentalOwner(Map<String, dynamic> rentalOwner) {
     if (_currentUserId == null || _currentUserId!.isEmpty) {
-      _showSnackBar('Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
+      _showSnackBar(
+          'Data akun belum siap, coba lagi sesaat lagi.', Colors.red);
       return;
     }
 
@@ -118,11 +102,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
       return;
     }
 
-    // Format unik room chat antara perental dan driver -- HARUS sama persis
-    // dengan sisi Perental (RentalsBookingPage._openChatWithDriver):
-    // room_rental_{perentalId}_driver_{driverId}. Di sini ownerId berperan
-    // sebagai perentalId, _currentUserId sebagai driverId -- sudah cocok.
-    final String uniqueChatId = 'room_rental_${ownerId}_driver_$_currentUserId';
+    final String uniqueChatId =
+        'room_rental_${ownerId}_driver_$_currentUserId';
 
     if (!mounted) return;
 
@@ -145,7 +126,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: color,
+        backgroundColor: color, // 🟢 semantic, tetap
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -153,6 +134,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
     );
   }
 
+  // 🟢 Warna status semantic — tetap di kedua mode
   Color _getStatusColor(String status) {
     switch (status) {
       case 'confirmed':
@@ -186,21 +168,24 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor
       appBar: AppBar(
         title: const Text(
           'Tugas Penugasan',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: false,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1E293B),
+        // 🟢 AppBar pakai token tema
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: colorScheme.surface,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey.shade200),
+          child: Container(height: 1, color: colorScheme.outlineVariant),
         ),
       ),
       body: _isLoading
@@ -218,7 +203,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                         itemCount: _assignedBookings.length,
                         padding: const EdgeInsets.all(16),
                         itemBuilder: (context, index) {
-                          return _buildAssignmentCard(_assignedBookings[index]);
+                          return _buildAssignmentCard(
+                              _assignedBookings[index]);
                         },
                       ),
                     ),
@@ -227,6 +213,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
 
   /// ================= STATE: ERROR =================
   Widget _buildErrorState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -236,17 +224,22 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.08),
+                // 🟢 0.08 → 0.15, semantic error
+                color: colorScheme.error.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.error_outline_rounded,
-                  size: 40, color: Colors.red),
+              child: Icon(Icons.error_outline_rounded,
+                  size: 40, color: colorScheme.error),
             ),
             const SizedBox(height: 16),
             Text(
               _errorMessage!,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              style: TextStyle(
+                // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
@@ -254,7 +247,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('Coba Lagi'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryColor,
+                backgroundColor: _primaryColor, // brand
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
@@ -270,24 +263,38 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
 
   /// ================= STATE: EMPTY =================
   Widget _buildEmptyState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.directions_car_outlined,
-                size: 48, color: Colors.grey.shade400),
+            Icon(
+              Icons.directions_car_outlined,
+              size: 48,
+              // 🟢 Ganti Colors.grey.shade400 → outline
+              color: colorScheme.outline,
+            ),
             const SizedBox(height: 12),
             Text(
               'Belum ada penugasan rental.',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              style: TextStyle(
+                // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               'Perental yang terhubung akan muncul di sini\nsetelah kamu ditugaskan pada sebuah booking.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 11.5),
+              style: TextStyle(
+                // 🟢 Ganti Colors.grey.shade400 → outline
+                color: colorScheme.outline,
+                fontSize: 11.5,
+              ),
             ),
           ],
         ),
@@ -297,16 +304,27 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
 
   Widget _infoRow(IconData icon, String label, String value,
       {Color? valueColor, FontWeight? valueWeight}) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 14, color: Colors.grey.shade400),
+          Icon(
+            icon,
+            size: 14,
+            // 🟢 Ganti Colors.grey.shade400 → outline
+            color: colorScheme.outline,
+          ),
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            style: TextStyle(
+              fontSize: 12,
+              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
           const Spacer(),
           Flexible(
@@ -316,7 +334,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: valueWeight ?? FontWeight.w600,
-                color: valueColor ?? const Color(0xFF1E293B),
+                // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                color: valueColor ?? colorScheme.onSurface,
               ),
             ),
           ),
@@ -327,6 +346,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
 
   /// ================= KARTU PENUGASAN =================
   Widget _buildAssignmentCard(dynamic booking) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     final car = booking['car'] ?? {};
     final renter = booking['user'] ?? {};
     final rentalOwner = booking['rental_owner'] ??
@@ -334,7 +355,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
         car['user'] ??
         {};
     final String status = booking['status'] ?? 'pending';
-    final statusColor = _getStatusColor(status);
+    final statusColor = _getStatusColor(status); // semantic, tetap
 
     final String startDateFormatted = _formatDate(booking['start_date']);
     final String endDateFormatted = _formatDate(booking['end_date']);
@@ -343,11 +364,13 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -363,10 +386,11 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
               Expanded(
                 child: Text(
                   car['name'] ?? 'Mobil Rental',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15.5,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
+                    // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -375,7 +399,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.15, tetap kelihatan di dark
+                  color: statusColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -383,7 +408,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.bold,
-                    color: statusColor,
+                    color: statusColor, // semantic
                   ),
                 ),
               ),
@@ -400,14 +425,16 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
           Container(
             margin: const EdgeInsets.symmetric(vertical: 10),
             height: 1,
-            color: Colors.grey.shade100,
+            // 🟢 Ganti Colors.grey.shade100 → outlineVariant
+            color: colorScheme.outlineVariant,
           ),
 
           // ===== Info perental & tombol chat =====
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _bgColor,
+              // 🟢 Ganti _bgColor → surfaceContainerHighest
+              color: colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
@@ -419,7 +446,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: _primaryColor.withOpacity(0.1),
+                          // 🟢 0.1 → 0.15
+                          color: _primaryColor.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: const Icon(Icons.storefront_rounded,
@@ -434,7 +462,8 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                               'Pengelola / Perental',
                               style: TextStyle(
                                 fontSize: 10.5,
-                                color: Colors.grey.shade500,
+                                // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                                color: colorScheme.onSurfaceVariant,
                               ),
                             ),
                             const SizedBox(height: 1),
@@ -442,10 +471,11 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                               rentalOwner['name'] ?? 'Admin Rental',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 13,
-                                color: Color(0xFF1E293B),
+                                // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                                color: colorScheme.onSurface,
                               ),
                             ),
                           ],
@@ -458,7 +488,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
                 _actionButton(
                   label: 'Chat',
                   icon: Icons.chat_bubble_outline_rounded,
-                  color: const Color(0xFF0D9488),
+                  color: const Color(0xFF0D9488), // teal brand, tetap
                   onPressed: () => _openChatWithRentalOwner(rentalOwner),
                 ),
               ],
@@ -472,7 +502,7 @@ class _DriverBookingsPageState extends State<DriverBookingsPage> {
   Widget _actionButton({
     required String label,
     required IconData icon,
-    required Color color,
+    required Color color, // brand semantic
     required VoidCallback onPressed,
   }) {
     return ElevatedButton.icon(

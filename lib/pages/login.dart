@@ -5,9 +5,9 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rentalcar/menu/dashboard.dart';
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/enums/app_enums.dart'; // 👈 Import Enums yang baru dibuat
-import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
-import 'package:rentalcar/services/token_storage.dart'; // 🟢 TAMBAHAN: secure storage
+import 'package:rentalcar/enums/app_enums.dart';
+import 'package:rentalcar/services/notification_socket_service.dart';
+import 'package:rentalcar/services/token_storage.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -19,15 +19,14 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
 
-  // Web Client ID (bukan Android)
   static const String _serverClientId =
       '1055921517849-kd3ps2tleptf1tmpqqadvnb9f64m7tpr.apps.googleusercontent.com';
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
   static const Color _dangerColor = Color(0xFFDC2626);
+  // 🟢 DIHAPUS: _bgColor — latar Scaffold sekarang ambil dari tema
 
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
@@ -38,7 +37,6 @@ class _LoginPageState extends State<LoginPage> {
         scopes: ['email', 'profile'],
       );
 
-      // Pastikan user bisa memilih akun Google yang berbeda jika mau
       await googleSignIn.signOut();
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
@@ -54,7 +52,8 @@ class _LoginPageState extends State<LoginPage> {
       final String? idToken = googleAuth.idToken;
 
       debugPrint('--- DEBUG TOKEN ---');
-      debugPrint('idToken: ${idToken != null ? "ADA (${idToken.length} chars)" : "NULL ❌"}');
+      debugPrint(
+          'idToken: ${idToken != null ? "ADA (${idToken.length} chars)" : "NULL ❌"}');
       debugPrint('-------------------');
 
       if (idToken == null) {
@@ -65,8 +64,6 @@ class _LoginPageState extends State<LoginPage> {
 
       debugPrint('Mengirim ke Laravel: ${ApiConfig.googleLogin}');
 
-      // Hit API Backend Laravel
-      // (sengaja pakai http biasa, bukan ApiClient: belum ada token saat login)
       final response = await http
           .post(
             Uri.parse(ApiConfig.googleLogin),
@@ -88,8 +85,6 @@ class _LoginPageState extends State<LoginPage> {
 
       debugPrint('Status code: ${response.statusCode}');
 
-      // Decode aman: respons non-JSON (mis. 502 berisi HTML) tidak
-      // melempar FormatException, tapi jatuh ke pesan generik di bawah.
       Map<String, dynamic> data = {};
       try {
         final decoded = jsonDecode(response.body);
@@ -106,16 +101,12 @@ class _LoginPageState extends State<LoginPage> {
           throw Exception('Respons login dari server tidak lengkap.');
         }
 
-        // 🟢 Simpan token ke secure storage (bukan SharedPreferences lagi)
         await TokenStorage.save(
           accessToken: accessToken,
           refreshToken: refreshToken,
           expiresIn: expiresIn.toInt(),
         );
 
-        // Data user non-sensitif tetap di SharedPreferences.
-        // Token TIDAK disimpan di sini: semua halaman sudah memakai
-        // ApiClient yang membaca token dari TokenStorage.
         final prefs = await SharedPreferences.getInstance();
 
         if (userData != null) {
@@ -130,10 +121,10 @@ class _LoginPageState extends State<LoginPage> {
             await prefs.setString('avatar_url', userData['avatar']);
           }
 
-          // 1. Simpan Role Spatie
           if (userData['roles'] != null) {
             List<dynamic> rawRoles = userData['roles'];
-            List<String> rolesList = rawRoles.map((e) => e.toString()).toList();
+            List<String> rolesList =
+                rawRoles.map((e) => e.toString()).toList();
 
             await prefs.setStringList('user_roles', rolesList);
 
@@ -142,29 +133,20 @@ class _LoginPageState extends State<LoginPage> {
             }
           }
 
-          // 2. 👇 SIMPAN PERMISSIONS SPATIE (Agar Flutter bisa validasi pakai AppPermission)
           if (userData['permissions'] != null) {
             List<dynamic> rawPermissions = userData['permissions'];
-            List<String> permissionsList = rawPermissions.map((e) => e.toString()).toList();
+            List<String> permissionsList =
+                rawPermissions.map((e) => e.toString()).toList();
 
             await prefs.setStringList('user_permissions', permissionsList);
           }
         }
 
-        debugPrint('✅ Login sukses! User ID: ${userData?['id']} | Email: ${userData?['email']}');
+        debugPrint(
+            '✅ Login sukses! User ID: ${userData?['id']} | Email: ${userData?['email']}');
 
-        // 🟢 TAMBAHAN: mulai koneksi real-time SEKALI di sini, tepat
-        // setelah token & user_id tersimpan.
-        // Sengaja tidak di-"await" — biar navigasi ke Dashboard tidak
-        // ikut menunggu proses koneksi WebSocket selesai dulu.
-        //
-        // CATATAN: registrasi FCM token sekarang dilakukan otomatis DI
-        // DALAM connect() (lihat NotificationSocketService), bukan di
-        // sini lagi — supaya juga jalan saat app dibuka ulang dengan
-        // sesi lama, bukan cuma pas login baru seperti alur ini.
         NotificationSocketService().connect();
 
-        // Navigasi ke Dashboard
         if (mounted) {
           Navigator.pushReplacement(
             context,
@@ -206,8 +188,12 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 🟢 Ambil token tema
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor hardcoded → pakai default tema
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -216,33 +202,41 @@ class _LoginPageState extends State<LoginPage> {
               const Spacer(flex: 3),
               _buildLogo(),
               const SizedBox(height: 28),
-              const Text(
+
+              // 🟢 'Selamat Datang' — headline + onSurface
+              Text(
                 'Selamat Datang',
-                style: TextStyle(
-                  fontSize: 24,
+                style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1E293B),
+                  color: colorScheme.onSurface,
                 ),
               ),
               const SizedBox(height: 8),
+
+              // 🟢 Subtitle — bodyMedium + onSurfaceVariant
               Text(
                 'Masuk untuk mulai menyewa mobil\nimpianmu dengan mudah',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey.shade500,
-                  fontSize: 13.5,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                   height: 1.5,
                 ),
               ),
+
               const Spacer(flex: 3),
               _buildFeatureRow(),
               const SizedBox(height: 28),
               _buildGoogleButton(),
               const SizedBox(height: 20),
+
+              // 🟢 Footer — bodySmall + outline (lebih redup, tetap terbaca)
               Text(
                 'Dengan masuk, kamu menyetujui Syarat & Ketentuan\nserta Kebijakan Privasi kami',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade400, fontSize: 11, height: 1.5),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.outline,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 24),
             ],
@@ -253,11 +247,14 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildLogo() {
+    // 🟢 Tetap pakai _primaryColor — brand warna yang sama di light/dark.
+    // Container pakai opacity 0.1 dari primary, di dark mode jadi biru gelap,
+    // kontras dengan ikon biru cerah di atasnya.
     return Container(
       width: 88,
       height: 88,
       decoration: BoxDecoration(
-        color: _primaryColor.withOpacity(0.1),
+        color: _primaryColor.withOpacity(0.15),
         shape: BoxShape.circle,
       ),
       child: const Icon(
@@ -269,6 +266,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildFeatureRow() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     final items = [
       (Icons.verified_user_outlined, 'Aman'),
       (Icons.flash_on_outlined, 'Cepat'),
@@ -286,22 +286,28 @@ class _LoginPageState extends State<LoginPage> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      // 🟢 Ganti Colors.white → surfaceContainerHighest
+                      // (light: abu terang, dark: abu gelap)
+                      color: colorScheme.surfaceContainerHighest,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          // 🟢 Shadow pakai skema tema biar halus di dark
+                          color: colorScheme.shadow.withOpacity(0.08),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
                       ],
                     ),
+                    // 🟢 _accentColor tetap — oranye khas brand
                     child: Icon(item.$1, size: 20, color: _accentColor),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     item.$2,
-                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -312,17 +318,22 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildGoogleButton() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return SizedBox(
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
         onPressed: _isLoading ? null : _signInWithGoogle,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF1E293B),
+          // 🟢 Adaptif: light = putih, dark = surface gelap
+          backgroundColor: colorScheme.surface,
+          foregroundColor: colorScheme.onSurface,
           elevation: 0,
-          side: BorderSide(color: Colors.grey.shade200),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          side: BorderSide(color: colorScheme.outlineVariant),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
         child: _isLoading
             ? const SizedBox(
@@ -338,9 +349,11 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   _buildGoogleIcon(),
                   const SizedBox(width: 12),
-                  const Text(
+                  Text(
                     'Masuk dengan Google',
-                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -349,6 +362,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// "G" multi-warna sederhana tanpa perlu aset gambar
+  /// 🟢 TIDAK diubah — warna logo Google memang harus tetap
   Widget _buildGoogleIcon() {
     return SizedBox(
       width: 20,
@@ -366,10 +380,10 @@ class _GoogleGPainter extends CustomPainter {
     final double strokeWidth = size.width * 0.22;
 
     final colors = <Color, List<double>>{
-      const Color(0xFF4285F4): [-45, 90], // biru: kanan atas
-      const Color(0xFF34A853): [45, 90], // hijau: kanan bawah
-      const Color(0xFFFBBC05): [135, 70], // kuning: kiri bawah
-      const Color(0xFFEA4335): [205, 85], // merah: kiri atas
+      const Color(0xFF4285F4): [-45, 90],
+      const Color(0xFF34A853): [45, 90],
+      const Color(0xFFFBBC05): [135, 70],
+      const Color(0xFFEA4335): [205, 85],
     };
 
     colors.forEach((color, angles) {
@@ -387,10 +401,10 @@ class _GoogleGPainter extends CustomPainter {
       );
     });
 
-    // Bar horizontal biru khas logo "G"
     final barPaint = Paint()..color = const Color(0xFF4285F4);
     canvas.drawRect(
-      Rect.fromLTWH(center.dx, center.dy - strokeWidth / 2, r - strokeWidth * 0.2, strokeWidth),
+      Rect.fromLTWH(center.dx, center.dy - strokeWidth / 2,
+          r - strokeWidth * 0.2, strokeWidth),
       barPaint,
     );
   }

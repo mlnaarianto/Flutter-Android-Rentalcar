@@ -21,10 +21,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   String? _currentUserId;
   String? _currentUserName;
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 DIHAPUS: _bgColor
 
   @override
   void initState() {
@@ -32,10 +32,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     _loadUserRoleAndBookings();
   }
 
-  // 🟢 TAMBAHAN: decode JSON yang aman. Respons non-JSON (mis. 502 berisi
-  // HTML dari gateway) atau JSON yang bukan object tidak melempar
-  // FormatException, tapi mengembalikan null. Pemanggil yang menentukan
-  // pesan error yang ditampilkan ke user.
   Map<String, dynamic>? _tryDecodeMap(String body) {
     try {
       final decoded = jsonDecode(body);
@@ -44,13 +40,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     return null;
   }
 
-  // Fungsi helper untuk membersihkan format tanggal (misal: 2026-06-06T00:00:00.000000Z -> 2026-06-06)
   String _formatDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return '-';
     return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
   }
 
-  /// Format angka harga jadi "Rp 1.200.000" biar konsisten dgn halaman lain
   String _formatPrice(dynamic raw) {
     if (raw == null) return 'Rp 0';
     final numValue = num.tryParse(raw.toString()) ?? 0;
@@ -67,12 +61,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     return 'Rp $buffer';
   }
 
-  // 🔴 FIX: SENGAJA tidak diberi fallback hardcode (mis. '3') untuk
-  // user_id, menyamakan pola dengan RentalsBookingPage/DriverBookingsPage.
-  // Kalau belum sempat ke-load dari SharedPreferences, _currentUserId
-  // tetap null/kosong dan setiap aksi yang butuh identitas user (buka
-  // chat) di-guard secara eksplisit di _openChatWithOwner -- bukan diam-
-  // diam memakai ID '3' yang bisa jadi identitas user lain.
   Future<void> _loadUserRoleAndBookings() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
@@ -84,15 +72,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     _fetchBookings();
   }
 
-  // 👇 DIGANTI: dulu manggil /bookings (role-scoped, ikut permission Perental/
-  // Driver/Admin). Sekarang manggil /bookings/my-history yang SELALU scoped
-  // ke user_id user login, apapun role/permission yang dia punya. Jadi kalau
-  // yang login itu Perental yang juga pernah nyewa mobil orang lain, cuma
-  // riwayat sewanya sendiri yang muncul di sini — bukan booking untuk mobil
-  // yang dia kelola.
-  //
-  // Token dipasang dan di-refresh otomatis oleh ApiClient. Kalau sesi
-  // benar-benar mati, onSessionExpired di main.dart yang mengarahkan ke login.
   Future<void> _fetchBookings() async {
     setState(() {
       _isLoading = true;
@@ -107,8 +86,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        // 🟢 DIUBAH: decode aman. 200 tapi bukan JSON object dianggap error,
-        // bukan FormatException dan bukan daftar kosong yang menyesatkan.
         final decoded = _tryDecodeMap(response.body);
         if (decoded == null) {
           setState(() {
@@ -159,7 +136,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         }
         _fetchBookings();
       } else {
-        // 🟢 DIUBAH: decode aman, pesan fallback menyertakan kode status.
         final decoded = _tryDecodeMap(response.body);
         if (mounted) {
           _showSnackBar(
@@ -176,20 +152,12 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
-  // 👇 DIGANTI TOTAL: dulu ini "simulasi" yang langsung PATCH payment_status=paid
-  // (celah keamanan, Penyewa bisa klaim lunas sendiri). Sekarang cuma NANYA
-  // status asli ke backend, yang backend-nya nanya ke Midtrans. Penyewa
-  // TIDAK BISA mengubah status ini sendiri.
   Future<void> _checkQrisPaymentStatus(int bookingId) async {
     try {
       final response = await ApiClient.instance.get(
         Uri.parse('${ApiConfig.baseUrl}/bookings/$bookingId/check-payment'),
       );
 
-      // 🟢 DIUBAH: sebelumnya jsonDecode dipanggil SEBELUM cek status,
-      // jadi respons non-JSON (502 berisi HTML, dsb) melempar
-      // FormatException dan user melihat "Error: FormatException...".
-      // Sekarang decode aman; status dicek lebih dulu.
       final decoded = _tryDecodeMap(response.body);
 
       if (response.statusCode == 200 && decoded != null) {
@@ -201,7 +169,9 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             newPaymentStatus == 'paid'
                 ? 'Pembayaran QRIS terkonfirmasi LUNAS!'
                 : 'Pembayaran belum diterima. Pastikan sudah scan & bayar QR, lalu coba cek lagi.',
-            newPaymentStatus == 'paid' ? const Color(0xFF16A34A) : _accentColor,
+            newPaymentStatus == 'paid'
+                ? const Color(0xFF16A34A)
+                : _accentColor,
           );
         }
       } else {
@@ -222,19 +192,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
-  // Navigasi ke Halaman Chat Penyewa <-> Perental (Pemilik Mobil).
-  //
-  // 🔴 FIX: menyamakan pola guard dengan _openChatWithRenter
-  // (RentalsBookingPage) dan _openChatWithRentalOwner (DriverBookingsPage).
-  // SEBELUMNYA ada fallback `carData['user_id']?.toString() ?? '2'` dan
-  // `_currentUserId ?? '3'`. Fallback ini berbahaya: kalau relasi pemilik
-  // mobil (car.user / car.owner) belum ter-load dari backend, atau
-  // _currentUserId belum sempat ke-load dari SharedPreferences, chat tetap
-  // dibuka tapi diam-diam memakai ID yang SALAH (owner fiktif ID 2, atau
-  // seolah penyewa login sebagai user ID 3) tanpa pemberitahuan apapun ke
-  // penyewa. Sekarang _currentUserId di-guard eksplisit di awal fungsi
-  // (return + snackbar), dan ownerId tidak lagi punya fallback angka --
-  // kalau tidak ditemukan, dianggap tidak valid dan navigasi dibatalkan.
   void _openChatWithOwner(dynamic carData) {
     if (carData == null) {
       _showSnackBar('Informasi kendaraan tidak tersedia.', Colors.red);
@@ -261,13 +218,9 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
         ? ownerMap['name'].toString()
         : 'Perental';
 
-    final String? ownerAvatar = ownerMap != null
-        ? ownerMap['avatar']?.toString()
-        : null;
+    final String? ownerAvatar =
+        ownerMap != null ? ownerMap['avatar']?.toString() : null;
 
-    // PENTING: skema "room_rental_{ownerId}_user_{currentUserId}" ini harus
-    // PERSIS SAMA dengan yang dipakai sisi Perental
-    // (RentalsBookingPage._openChatWithRenter) untuk room yang sama.
     final String uniqueChatId = 'room_rental_${ownerId}_user_$_currentUserId';
 
     if (!mounted) return;
@@ -291,7 +244,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: color,
+        backgroundColor: color, // 🟢 semantic, tetap
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -299,15 +252,19 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     );
   }
 
-  // 👇 DIGANTI: dulu QR-nya dummy (Icon qr_code_2), sekarang pakai qris_url
-  // asli dari Midtrans. Tombol "Simulasi Sudah Bayar" dihapus, diganti
-  // "Cek Status Pembayaran" yang manggil backend (bukan ubah status sendiri).
+  /// ================= DIALOG QRIS =================
+  /// ⚠️ ATURAN KHUSUS: kotak QR tetap **putih** di kedua mode —
+  /// bukan sekadar preferensi visual, tapi kebutuhan fungsional
+  /// (QR harus punya kontras tinggi agar bisa discan kamera HP lain).
+  /// Ini juga standar UX e-wallet (GoPay, OVO, Dana).
   void _showQrisDialog(BuildContext context, dynamic booking) {
     final String? qrisUrl = booking['qris_url'];
 
     showDialog(
       context: context,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+
         return AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -317,7 +274,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               Container(
                 padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color: _primaryColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.12, tetap terlihat di dark
+                  color: _primaryColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(9),
                 ),
                 child: const Icon(
@@ -339,16 +297,22 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               Text(
                 'Silakan scan QR Code di bawah ini:',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                style: TextStyle(
+                  // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 16),
               if (qrisUrl != null)
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _bgColor,
+                    // 🟢 SENGAJA tetap putih — QR butuh latar putih
+                    // untuk bisa discan. Tidak diubah per mode.
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.grey.shade200),
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
@@ -372,11 +336,16 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                       errorBuilder: (context, error, stackTrace) => Container(
                         height: 180,
                         width: 180,
-                        color: _bgColor,
+                        // 🟢 Tetap putih — konsisten dengan latar QR
+                        color: Colors.white,
                         child: const Center(
                           child: Text(
                             'Gagal memuat QR',
-                            style: TextStyle(fontSize: 12),
+                            style: TextStyle(
+                              fontSize: 12,
+                              // 🟢 Teks gelap karena bg putih — tetap
+                              color: Colors.black54,
+                            ),
                           ),
                         ),
                       ),
@@ -384,20 +353,27 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                   ),
                 )
               else
+                // Placeholder "QR belum tersedia" — ini BUKAN QR asli,
+                // jadi pakai token tema seperti widget biasa
                 Container(
                   height: 180,
                   width: 180,
                   decoration: BoxDecoration(
-                    color: _bgColor,
+                    // 🟢 Ganti _bgColor → surfaceContainerHighest
+                    color: colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Padding(
-                      padding: EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
                       child: Text(
                         'QR belum tersedia.\nSilakan hubungi Perental.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12),
+                        style: TextStyle(
+                          fontSize: 12,
+                          // 🟢 Teks placeholder pakai onSurfaceVariant
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),
@@ -407,7 +383,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 'Total: ${_formatPrice(booking['total_price'])}',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: _primaryColor,
+                  color: _primaryColor, // brand biru
                   fontSize: 15,
                 ),
               ),
@@ -415,7 +391,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               Text(
                 'Setelah scan & bayar, tekan tombol di bawah untuk memeriksa status pembayaran.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                style: TextStyle(
+                  fontSize: 11,
+                  // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -425,7 +405,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               onPressed: () => Navigator.pop(context),
               child: Text(
                 'Tutup',
-                style: TextStyle(color: Colors.grey.shade700),
+                style: TextStyle(
+                  // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             ElevatedButton(
@@ -449,6 +432,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     );
   }
 
+  // 🟢 Warna status semantic — tetap di kedua mode
   Color _getStatusColor(String status) {
     switch (status) {
       case 'confirmed':
@@ -482,47 +466,53 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor
       appBar: AppBar(
         title: const Text(
           'Riwayat Pemesanan',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: false,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1E293B),
+        // 🟢 AppBar pakai token tema
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: colorScheme.surface,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey.shade200),
+          child: Container(height: 1, color: colorScheme.outlineVariant),
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
+          ? const Center(
+              child: CircularProgressIndicator(color: _primaryColor))
           : _errorMessage != null
-          ? _buildErrorState()
-          : _bookings.isEmpty
-          ? _buildEmptyState()
-          : RefreshIndicator(
-              color: _primaryColor,
-              onRefresh: _fetchBookings,
-              child: ListView.builder(
-                physics: const AlwaysScrollableScrollPhysics(),
-                itemCount: _bookings.length,
-                padding: const EdgeInsets.all(16),
-                itemBuilder: (context, index) {
-                  return _buildBookingCard(_bookings[index]);
-                },
-              ),
-            ),
+              ? _buildErrorState()
+              : _bookings.isEmpty
+                  ? _buildEmptyState()
+                  : RefreshIndicator(
+                      color: _primaryColor,
+                      onRefresh: _fetchBookings,
+                      child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: _bookings.length,
+                        padding: const EdgeInsets.all(16),
+                        itemBuilder: (context, index) {
+                          return _buildBookingCard(_bookings[index]);
+                        },
+                      ),
+                    ),
       bottomNavigationBar: Bottom(currentIndex: 2, onTap: (index) {}),
     );
   }
 
   /// ================= STATE: ERROR =================
   Widget _buildErrorState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -532,20 +522,25 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.08),
+                // 🟢 0.08 → 0.15, error semantic
+                color: colorScheme.error.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.error_outline_rounded,
                 size: 40,
-                color: Colors.red,
+                color: colorScheme.error,
               ),
             ),
             const SizedBox(height: 16),
             Text(
               _errorMessage!,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
+              style: TextStyle(
+                // 🟢 Ganti Colors.grey.shade700 → onSurfaceVariant
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
@@ -572,6 +567,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
   /// ================= STATE: EMPTY =================
   Widget _buildEmptyState() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -579,12 +576,17 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
           Icon(
             Icons.receipt_long_outlined,
             size: 48,
-            color: Colors.grey.shade400,
+            // 🟢 Ganti Colors.grey.shade400 → outline
+            color: colorScheme.outline,
           ),
           const SizedBox(height: 12),
           Text(
             'Belum ada riwayat pemesanan.',
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            style: TextStyle(
+              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
           ),
         ],
       ),
@@ -598,16 +600,27 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     Color? valueColor,
     FontWeight? valueWeight,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 14, color: Colors.grey.shade400),
+          Icon(
+            icon,
+            size: 14,
+            // 🟢 Ganti Colors.grey.shade400 → outline
+            color: colorScheme.outline,
+          ),
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            style: TextStyle(
+              fontSize: 12,
+              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
           const Spacer(),
           Flexible(
@@ -617,7 +630,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: valueWeight ?? FontWeight.w600,
-                color: valueColor ?? const Color(0xFF1E293B),
+                // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                color: valueColor ?? colorScheme.onSurface,
               ),
             ),
           ),
@@ -628,6 +642,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
   /// ================= KARTU BOOKING =================
   Widget _buildBookingCard(dynamic booking) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     final car = booking['car'] ?? {};
     final driver = booking['driver'];
     final status = booking['status'] ?? 'pending';
@@ -645,11 +661,13 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -665,10 +683,11 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               Expanded(
                 child: Text(
                   car['name'] ?? 'Mobil Rental',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15.5,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
+                    // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -679,7 +698,8 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.15, tetap kelihatan di dark
+                  color: statusColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -710,6 +730,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             Icons.key_outlined,
             'Layanan',
             withDriver ? 'Dengan Driver' : 'Lepas Kunci',
+            // 🟢 Indigo brand — tetap
             valueColor: withDriver ? const Color(0xFF4F46E5) : null,
           ),
           if (withDriver && driver != null)
@@ -717,13 +738,15 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               Icons.badge_outlined,
               'Driver Bertugas',
               '${driver['name']}',
+              // 🟢 Hijau semantic — tetap
               valueColor: const Color(0xFF16A34A),
             ),
 
           Container(
             margin: const EdgeInsets.symmetric(vertical: 10),
             height: 1,
-            color: Colors.grey.shade100,
+            // 🟢 Ganti Colors.grey.shade100 → outlineVariant
+            color: colorScheme.outlineVariant,
           ),
 
           // ===== Pembayaran =====
@@ -739,12 +762,17 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 Icon(
                   Icons.verified_outlined,
                   size: 14,
-                  color: Colors.grey.shade400,
+                  // 🟢 Ganti Colors.grey.shade400 → outline
+                  color: colorScheme.outline,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   'Status Pembayaran',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(
+                    fontSize: 12,
+                    // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const Spacer(),
                 Container(
@@ -753,9 +781,10 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
+                    // 🟢 0.1 → 0.15 untuk kedua kemungkinan (paid & unpaid)
                     color: isPaid
-                        ? const Color(0xFF16A34A).withOpacity(0.1)
-                        : _accentColor.withOpacity(0.1),
+                        ? const Color(0xFF16A34A).withOpacity(0.15)
+                        : _accentColor.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -763,6 +792,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.bold,
+                      // 🟢 Semantic color — tetap
                       color: isPaid ? const Color(0xFF16A34A) : _accentColor,
                     ),
                   ),
@@ -777,13 +807,17 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             children: [
               Text(
                 'Total Biaya',
-                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
               Text(
                 _formatPrice(booking['total_price']),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: _primaryColor,
+                  color: _primaryColor, // brand biru
                   fontSize: 16,
                 ),
               ),
@@ -792,12 +826,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
           const SizedBox(height: 14),
 
-          // 👇 Tombol di halaman ini murni sudut pandang PENYEWA
-          // (halaman ini menampilkan riwayat sewa milik sendiri).
-          // Tombol "Konfirmasi Tunai Lunas" khusus Perental/Driver
-          // DIHAPUS dari sini — itu action pemilik mobil, bukan
-          // penyewa, dan sebaiknya ada di halaman "Kelola Booking"
-          // yang memanggil endpoint /bookings (role-scoped).
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -812,14 +840,14 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
               _actionButton(
                 label: 'Chat Perental',
                 icon: Icons.chat_bubble_outline_rounded,
-                color: const Color(0xFF0D9488),
+                color: const Color(0xFF0D9488), // teal brand
                 onPressed: () => _openChatWithOwner(car),
               ),
               if (status == 'pending')
                 _actionButton(
                   label: 'Batalkan',
                   icon: Icons.cancel_outlined,
-                  color: const Color(0xFFDC2626),
+                  color: const Color(0xFFDC2626), // merah semantic
                   outlined: true,
                   onPressed: () => _cancelBooking(booking['id']),
                 ),
@@ -840,7 +868,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     if (outlined) {
       return OutlinedButton.icon(
         style: OutlinedButton.styleFrom(
-          foregroundColor: color,
+          foregroundColor: color, // 🟢 semantic, tetap
           side: BorderSide(color: color.withOpacity(0.4)),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           minimumSize: Size.zero,
@@ -858,7 +886,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
     return ElevatedButton.icon(
       style: ElevatedButton.styleFrom(
-        backgroundColor: color,
+        backgroundColor: color, // 🟢 brand/semantic, tetap
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),

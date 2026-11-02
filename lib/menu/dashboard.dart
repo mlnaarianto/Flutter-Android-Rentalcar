@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:rentalcar/services/api_client.dart'; // 🟢 refresh token otomatis
+import 'package:rentalcar/services/api_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/menu/car_detail_page.dart';
 import 'package:rentalcar/enums/app_enums.dart';
-import 'package:rentalcar/services/notification_socket_service.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/services/notification_socket_service.dart';
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -23,13 +23,12 @@ class _DashboardState extends State<Dashboard> {
   String _userName = '';
   String _userRole = '';
   String _searchQuery = '';
-  int?
-  _currentUserId; // 👈 Tambahkan variabel ini untuk ngecek kepemilikan mobil
+  int? _currentUserId;
 
-  // ================= WARNA TEMA =================
+  // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 DIHAPUS: _bgColor — placeholder pakai colorScheme.surfaceContainerHighest
 
   @override
   void initState() {
@@ -53,16 +52,12 @@ class _DashboardState extends State<Dashboard> {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      // 🟢 DIPERBAIKI: sebelumnya membaca key 'email', padahal login.dart
-      // menyimpan email dengan key 'user_email'. Akibatnya fallback nama
-      // (bagian sebelum '@') tidak pernah terpakai.
       _userName =
           prefs.getString('user_name') ??
           prefs.getString('user_email')?.split('@')[0] ??
           'Pengguna';
       _userRole = prefs.getString('role') ?? AppRole.penyewa.value;
 
-      // 👇 Ambil ID user yang sedang login
       final storedId = prefs.get('user_id');
       if (storedId is int) {
         _currentUserId = storedId;
@@ -77,8 +72,6 @@ class _DashboardState extends State<Dashboard> {
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      // Token, header Accept/Authorization, dan refresh otomatis
-      // ditangani ApiClient.
       final response = await ApiClient.instance
           .get(Uri.parse('${ApiConfig.baseUrl}/cars'))
           .timeout(const Duration(seconds: 30));
@@ -97,7 +90,6 @@ class _DashboardState extends State<Dashboard> {
     } catch (e) {
       debugPrint('Dashboard: error ambil mobil: $e');
     } finally {
-      // Selalu matikan spinner, apa pun hasilnya.
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -113,7 +105,6 @@ class _DashboardState extends State<Dashboard> {
           final name = (car['name'] ?? '').toString().toLowerCase();
           final brand = (car['brand'] ?? '').toString().toLowerCase();
 
-          // 👇 Tambahkan pencarian berdasarkan nama pemilik
           String ownerStr = '';
           if (car['user'] != null && car['user']['name'] != null) {
             ownerStr = car['user']['name'].toString().toLowerCase();
@@ -157,6 +148,9 @@ class _DashboardState extends State<Dashboard> {
     return 'Rp $buffer';
   }
 
+  // 🟢 Warna status SENGAJA tetap hex — ini warna semantik
+  // (hijau=tersedia, oranye=disewa, merah=perbaikan) yang harus
+  // sama persis di light maupun dark untuk makna yang konsisten.
   Color _statusColor(String status) {
     switch (status) {
       case 'tersedia':
@@ -190,8 +184,7 @@ class _DashboardState extends State<Dashboard> {
       currentIndex: 0,
       onTap: (index) {},
       appBarSearchCallback: _filterCars,
-      showNotification:
-          true, // 🟢 TAMBAHAN: supaya icon notif muncul di Dashboard
+      showNotification: true,
       content: RefreshIndicator(
         color: _primaryColor,
         onRefresh: _fetchDashboardCars,
@@ -215,6 +208,9 @@ class _DashboardState extends State<Dashboard> {
   }
 
   /// ================= BANNER SELAMAT DATANG =================
+  /// ⚠️ ZONA BIRU: gradient brand + teks putih — SENGAJA tidak diubah.
+  /// Kontrasnya sudah benar di kedua mode (biru cerah di atas latar
+  /// apa pun, teks putih selalu terbaca).
   Widget _buildWelcomeBanner() {
     final bool isOwner = _userRole == AppRole.perental.value;
     return Container(
@@ -285,21 +281,26 @@ class _DashboardState extends State<Dashboard> {
 
   /// ================= LABEL BAGIAN + JUMLAH UNIT =================
   Widget _buildSectionHeader() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text(
+        Text(
           'Daftar Mobil Tersedia',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF1E293B),
+            // 🟢 Ganti Color(0xFF1E293B) → onSurface
+            color: colorScheme.onSurface,
           ),
         ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: _primaryColor.withOpacity(0.08),
+            // 🟢 0.08 → 0.15, biar tetap kelihatan di dark mode
+            color: _primaryColor.withOpacity(0.15),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
@@ -316,18 +317,25 @@ class _DashboardState extends State<Dashboard> {
   }
 
   Widget _buildSearchIndicator() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(top: 10, bottom: 4),
       child: Row(
         children: [
-          Icon(Icons.search_rounded, size: 14, color: Colors.grey.shade500),
+          Icon(
+            Icons.search_rounded,
+            size: 14,
+            // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+            color: colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               'Hasil pencarian untuk: "$_searchQuery"',
               style: TextStyle(
                 fontStyle: FontStyle.italic,
-                color: Colors.grey.shade600,
+                color: colorScheme.onSurfaceVariant,
                 fontSize: 12.5,
               ),
             ),
@@ -349,6 +357,8 @@ class _DashboardState extends State<Dashboard> {
     }
 
     if (_filteredCars.isEmpty) {
+      final colorScheme = Theme.of(context).colorScheme;
+
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(40.0),
@@ -357,7 +367,8 @@ class _DashboardState extends State<Dashboard> {
               Icon(
                 Icons.search_off_rounded,
                 size: 44,
-                color: Colors.grey.shade400,
+                // 🟢 Ganti Colors.grey.shade400 → outline
+                color: colorScheme.outline,
               ),
               const SizedBox(height: 12),
               Text(
@@ -365,7 +376,11 @@ class _DashboardState extends State<Dashboard> {
                     ? 'Tidak ada mobil yang cocok dengan pencarianmu.'
                     : 'Belum ada mobil yang tersedia.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                style: TextStyle(
+                  // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -386,16 +401,17 @@ class _DashboardState extends State<Dashboard> {
 
   /// ================= KARTU MOBIL =================
   Widget _buildCarCard(dynamic car) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     final imageUrl = _getImageUrl(car['image']);
     final String status = car['status'] ?? '';
     final statusColor = _statusColor(status);
 
-    // 👇 Cek kepemilikan
     final int carUserId = int.tryParse(car['user_id'].toString()) ?? 0;
     final bool isOwnerCar =
         _currentUserId != null && carUserId == _currentUserId;
 
-    // 👇 Ambil nama pemilik
     String ownerName = 'Pemilik Tidak Diketahui';
     if (car['user'] != null && car['user']['name'] != null) {
       ownerName = car['user']['name'];
@@ -403,17 +419,19 @@ class _DashboardState extends State<Dashboard> {
       ownerName = car['owner_name'];
     }
 
-    // 👇 Setel warna sesuai kepemilikan
+    // 🟢 Warna brand semantic — sama di kedua mode
     final Color ownerColor = isOwnerCar ? _accentColor : _primaryColor;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema (halus di dark, tetap halus di light)
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -444,8 +462,7 @@ class _DashboardState extends State<Dashboard> {
                           ? Image.network(
                               imageUrl,
                               width: 84,
-                              height:
-                                  94, // 👈 Ditinggikan sedikit agar seimbang dengan tambahan teks
+                              height: 94,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
                                   _buildPlaceholder(),
@@ -462,6 +479,9 @@ class _DashboardState extends State<Dashboard> {
                           decoration: BoxDecoration(
                             color: statusColor,
                             shape: BoxShape.circle,
+                            // 🟢 Sengaja tetap putih — border ini melingkari
+                            // titik status di atas FOTO mobil, bukan di atas
+                            // surface. Putih selalu kontras dengan konten foto.
                             border: Border.all(color: Colors.white, width: 1.6),
                           ),
                         ),
@@ -480,7 +500,8 @@ class _DashboardState extends State<Dashboard> {
                               (car['brand'] ?? '').toString().toUpperCase(),
                               style: TextStyle(
                                 fontSize: 10.5,
-                                color: Colors.grey.shade500,
+                                // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                                color: colorScheme.onSurfaceVariant,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 0.4,
                               ),
@@ -493,7 +514,8 @@ class _DashboardState extends State<Dashboard> {
                                 vertical: 3,
                               ),
                               decoration: BoxDecoration(
-                                color: statusColor.withOpacity(0.1),
+                                // 🟢 0.1 → 0.15, tetap kelihatan di dark
+                                color: statusColor.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
@@ -512,10 +534,11 @@ class _DashboardState extends State<Dashboard> {
                         car['name'] ?? 'Mobil Rental',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E293B),
+                          // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                          color: colorScheme.onSurface,
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -524,41 +547,40 @@ class _DashboardState extends State<Dashboard> {
                           Icon(
                             Icons.event_seat_outlined,
                             size: 13,
-                            color: Colors.grey.shade400,
+                            // 🟢 Ganti Colors.grey.shade400 → outline
+                            color: colorScheme.outline,
                           ),
                           const SizedBox(width: 3),
                           Text(
                             '${car['seats'] ?? '-'} Kursi',
                             style: TextStyle(
                               fontSize: 11.5,
-                              color: Colors.grey.shade600,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Icon(
                             Icons.calendar_today_outlined,
                             size: 12,
-                            color: Colors.grey.shade400,
+                            color: colorScheme.outline,
                           ),
                           const SizedBox(width: 3),
                           Text(
                             '${car['year'] ?? '-'}',
                             style: TextStyle(
                               fontSize: 11.5,
-                              color: Colors.grey.shade600,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 4),
-
-                      // 👇 Tambahan Label Pemilik
                       Row(
                         children: [
                           Icon(
                             Icons.person_pin_rounded,
                             size: 13,
-                            color: ownerColor,
+                            color: ownerColor, // brand semantic
                           ),
                           const SizedBox(width: 4),
                           Expanded(
@@ -577,13 +599,16 @@ class _DashboardState extends State<Dashboard> {
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 8),
+                      const Text(
+                        '',
+                        style: TextStyle(fontSize: 0),
+                      ), // placeholder supaya layout stabil
                       Text(
                         '${_formatPrice(car['price_per_day'])} / hari',
                         style: const TextStyle(
                           fontSize: 13.5,
-                          color: _primaryColor,
+                          color: _primaryColor, // brand biru
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -594,7 +619,8 @@ class _DashboardState extends State<Dashboard> {
                 Icon(
                   Icons.arrow_forward_ios_rounded,
                   size: 13,
-                  color: Colors.grey.shade400,
+                  // 🟢 Ganti Colors.grey.shade400 → outline
+                  color: colorScheme.outline,
                 ),
               ],
             ),
@@ -605,13 +631,18 @@ class _DashboardState extends State<Dashboard> {
   }
 
   Widget _buildPlaceholder() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: 84,
-      height: 94, // 👈 Samakan dengan tinggi network image
-      color: _bgColor,
+      height: 94,
+      // 🟢 Ganti _bgColor → surfaceContainerHighest
+      // (light: abu terang, dark: abu gelap)
+      color: colorScheme.surfaceContainerHighest,
       child: Icon(
         Icons.directions_car_rounded,
-        color: Colors.grey.shade400,
+        // 🟢 Ganti Colors.grey.shade400 → outline
+        color: colorScheme.outline,
         size: 30,
       ),
     );

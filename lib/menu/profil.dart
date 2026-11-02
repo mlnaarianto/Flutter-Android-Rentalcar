@@ -10,7 +10,7 @@ import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:rentalcar/layouts/app.dart';
 import 'package:rentalcar/config/api_config.dart';
 import 'package:rentalcar/enums/app_enums.dart';
-import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/services/api_client.dart';
 
 class ProfilPage extends StatefulWidget {
   const ProfilPage({super.key});
@@ -28,13 +28,10 @@ class _ProfilPageState extends State<ProfilPage> {
   final TextEditingController _hpController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
 
-  // Controller Tambahan untuk SIM
   final TextEditingController _simNumberController = TextEditingController();
   final TextEditingController _simTypeController = TextEditingController();
   final TextEditingController _simExpiredController = TextEditingController();
 
-  // 🟢 TAMBAHAN: nomor HP lengkap format internasional (mis. "+6281234567890")
-  // Inilah yang dikirim ke backend, bukan _hpController.text lagi.
   String _completePhoneNumber = '';
 
   String? avatarUrl;
@@ -42,13 +39,13 @@ class _ProfilPageState extends State<ProfilPage> {
   File? ktpImage;
   String? ktpUrl;
 
-  // Variabel untuk SIM Image
   File? simImage;
   String? simUrl;
 
   bool _isLoading = true;
   bool _isSaving = false;
 
+  // ================= BRAND & SEMANTIC COLORS (tetap) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
   static const Color _dangerColor = Color(0xFFDC2626);
@@ -72,39 +69,21 @@ class _ProfilPageState extends State<ProfilPage> {
     super.dispose();
   }
 
-  /// ================= FIX FOTO GOOGLE BURAM/PIXELATED =================
-  /// Google Sign-In mengembalikan URL foto profil dengan parameter ukuran
-  /// bawaan yang kecil, biasanya diakhiri "=s96-c" (96x96 px, thumbnail).
-  /// Kalau dipakai langsung untuk avatar besar/full-screen, hasilnya pecah
-  /// karena gambar kecil di-stretch. Ini BUKAN masalah scope OAuth ("profile"/
-  /// "email"), murni parameter resolusi di URL-nya.
-  ///
-  /// Solusinya: ganti angka ukurannya jadi lebih besar sebelum dipakai render.
-  /// [size] 200 cukup untuk avatar bulat, dan otomatis dipakai lebih besar (600)
-  /// untuk mode full-screen viewer supaya tetap tajam saat di-zoom.
   String? _hiResAvatarUrl(String? url, {int size = 200}) {
     if (url == null || url.isEmpty) return url;
     final sizePattern = RegExp(r'=s\d+-c(-[a-z0-9]+)?$');
     if (sizePattern.hasMatch(url)) {
       return url.replaceAll(sizePattern, '=s$size-c');
     }
-    // Kalau backend menyimpan ulang fotonya sendiri (bukan URL langsung dari
-    // Google, misalnya sudah di-download & disimpan di server), parameter
-    // ukuran ini tidak akan ada. Berarti sumber buramnya ada di sisi server
-    // (foto disimpan dalam resolusi kecil), bukan di aplikasi Flutter ini.
     return url;
   }
 
-  /// ================= FETCH DATA DARI LARAVEL API =================
   Future<void> _fetchUserData() async {
     try {
-      // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
       final response = await ApiClient.instance
           .get(Uri.parse(ApiConfig.userProfile))
           .timeout(const Duration(seconds: 20));
 
-      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
-      // halaman ini sudah tidak ada.
       if (!mounted) return;
 
       if (response.statusCode == 200) {
@@ -113,7 +92,6 @@ class _ProfilPageState extends State<ProfilPage> {
 
         final personalData = userData['personal_data'] ?? {};
 
-        // Prefs tetap dipakai untuk data user non-sensitif (avatar_url).
         final String? fetchedAvatar = userData['avatar'];
         if (fetchedAvatar != null && fetchedAvatar.isNotEmpty) {
           final prefs = await SharedPreferences.getInstance();
@@ -122,7 +100,6 @@ class _ProfilPageState extends State<ProfilPage> {
 
         if (!mounted) return;
 
-        // Fungsi helper untuk membersihkan format tanggal ISO (misal: 2000-01-01T00:00:00.000000Z -> 2000-01-01)
         String formatDate(String? dateStr) {
           if (dateStr == null || dateStr.isEmpty) return '';
           return dateStr.contains('T') ? dateStr.split('T')[0] : dateStr;
@@ -132,10 +109,6 @@ class _ProfilPageState extends State<ProfilPage> {
           _namaController.text = userData['name'] ?? '';
           _emailController.text = userData['email'] ?? '';
 
-          // Nomor HP yang tersimpan di server (bisa jadi format lama tanpa '+',
-          // atau sudah format internasional). Dipakai sebagai initialValue
-          // IntlPhoneField, dan sebagai fallback _completePhoneNumber sebelum
-          // user mengubahnya.
           final String rawPhone = personalData['phone'] ?? '';
           _hpController.text = rawPhone;
           _completePhoneNumber = rawPhone;
@@ -143,15 +116,13 @@ class _ProfilPageState extends State<ProfilPage> {
           _addressController.text = personalData['address'] ?? '';
           ktpUrl = personalData['ktp_image'];
 
-          // Tanggal Lahir (Dibersihkan formatnya)
           _tglLahirController.text = formatDate(personalData['birth_date']);
 
-          // Set Data SIM dari Server
           _simNumberController.text = personalData['sim_number'] ?? '';
           _simTypeController.text = personalData['sim_type'] ?? '';
 
-          // Masa Berlaku SIM (Dibersihkan formatnya)
-          _simExpiredController.text = formatDate(personalData['sim_expired_date']);
+          _simExpiredController.text =
+              formatDate(personalData['sim_expired_date']);
 
           simUrl = personalData['sim_image'];
 
@@ -159,12 +130,11 @@ class _ProfilPageState extends State<ProfilPage> {
           _isLoading = false;
         });
       } else if (response.statusCode == 401) {
-        // Sampai sini berarti refresh gagal sementara (jaringan/server),
-        // bukan sesi mati (kalau sesi mati, sudah ke LoginPage).
         throw Exception(
             "Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.");
       } else {
-        throw Exception("Gagal mengambil data profil (${response.statusCode})");
+        throw Exception(
+            "Gagal mengambil data profil (${response.statusCode})");
       }
     } catch (e) {
       if (!mounted) return;
@@ -175,7 +145,6 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= DATE PICKER (Lahir) =================
   Future<void> _pickDate() async {
     DateTime? picked = await showDatePicker(
       context: context,
@@ -193,7 +162,6 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= DATE PICKER (SIM Expired) =================
   Future<void> _pickSimExpiredDate() async {
     DateTime? picked = await showDatePicker(
       context: context,
@@ -211,7 +179,6 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= UPLOAD KTP =================
   Future<void> _uploadKtp() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image =
@@ -224,7 +191,6 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= UPLOAD SIM =================
   Future<void> _uploadSim() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image =
@@ -237,10 +203,6 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= ZOOM VIEWER =================
-  /// Buka foto secara fullscreen dengan pinch-to-zoom + double-tap zoom.
-  /// Menerima salah satu dari [networkUrl] atau [localFile] (prioritas file lokal
-  /// kalau user baru saja memilih foto baru yang belum diupload).
   void _openImageViewer({
     String? networkUrl,
     File? localFile,
@@ -270,19 +232,8 @@ class _ProfilPageState extends State<ProfilPage> {
     );
   }
 
-  /// ================= HELPER: EKSTRAK PESAN ERROR VALIDASI DARI LARAVEL =================
-  /// 🟢 TAMBAHAN: Laravel mengembalikan HTTP 422 dengan body:
-  /// {
-  ///   "message": "...",
-  ///   "errors": {
-  ///     "phone": ["Nomor HP ini sudah digunakan oleh akun lain"],
-  ///     "sim_number": ["Nomor SIM ini sudah digunakan oleh akun lain"]
-  ///   }
-  /// }
-  /// Fungsi ini mengambil SEMUA pesan dari setiap field yang error, lalu
-  /// menggabungkannya jadi satu string yang bisa ditampilkan ke user
-  /// (bukan cuma "Gagal menyimpan profil (422)" yang tidak informatif).
-  String _extractValidationMessage(Map<String, dynamic> responseData, int statusCode) {
+  String _extractValidationMessage(
+      Map<String, dynamic> responseData, int statusCode) {
     final errors = responseData['errors'];
 
     if (errors is Map<String, dynamic> && errors.isNotEmpty) {
@@ -302,14 +253,9 @@ class _ProfilPageState extends State<ProfilPage> {
       }
     }
 
-    // Fallback kalau tidak ada 'errors' spesifik, pakai 'message' dari backend
     return responseData['message'] ?? "Gagal menyimpan profil ($statusCode)";
   }
 
-  /// 🟢 Membangun MultipartRequest baru. Dipanggil ulang oleh
-  /// ApiClient.sendMultipart saat retry setelah 401, karena request
-  /// multipart hanya bisa dikirim sekali (file dibaca ulang dari disk).
-  /// Header Authorization TIDAK diset di sini: ApiClient yang memasang.
   Future<http.MultipartRequest> _buildSaveRequest() async {
     final request = http.MultipartRequest(
       'POST',
@@ -318,14 +264,10 @@ class _ProfilPageState extends State<ProfilPage> {
 
     request.fields['_method'] = 'PATCH';
 
-    // Data Personal Umum
-    // 🟢 UBAH: pakai nomor lengkap format internasional (+62..., +60..., dst)
-    // yang dihasilkan IntlPhoneField, bukan _hpController.text mentah lagi.
     request.fields['phone'] = _completePhoneNumber;
     request.fields['birth_date'] = _tglLahirController.text;
     request.fields['address'] = _addressController.text;
 
-    // Data SIM
     request.fields['sim_number'] = _simNumberController.text;
     request.fields['sim_type'] = _simTypeController.text;
     request.fields['sim_expired_date'] = _simExpiredController.text;
@@ -345,7 +287,6 @@ class _ProfilPageState extends State<ProfilPage> {
     return request;
   }
 
-  /// ================= SAVE =================
   Future<void> _saveProfile() async {
     if (_formKey.currentState!.validate()) {
       if (ktpImage == null && ktpUrl == null) {
@@ -357,7 +298,8 @@ class _ProfilPageState extends State<ProfilPage> {
 
       if (simImage == null && simUrl == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Foto SIM wajib diupload untuk Driver/Penyewa")),
+          const SnackBar(
+              content: Text("Foto SIM wajib diupload untuk Driver/Penyewa")),
         );
         return;
       }
@@ -365,42 +307,34 @@ class _ProfilPageState extends State<ProfilPage> {
       setState(() => _isSaving = true);
 
       try {
-        // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
         final streamedResponse = await ApiClient.instance
             .sendMultipart(_buildSaveRequest)
             .timeout(const Duration(seconds: 90));
         final response = await http.Response.fromStream(streamedResponse);
 
-        // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
-        // halaman ini sudah tidak ada. Jangan lanjut pakai context.
         if (!mounted) return;
 
-        // 🟢 TAMBAHAN: decode body-nya dulu supaya bisa baca 'errors' dari Laravel,
-        // baik untuk kasus sukses (200) maupun gagal (422/500/dll).
         Map<String, dynamic> responseData = {};
         try {
           responseData = jsonDecode(response.body);
-        } catch (_) {
-          // Body bukan JSON valid, biarkan responseData tetap kosong,
-          // nanti fallback ke pesan generic di bawah.
-        }
+        } catch (_) {}
 
         if (response.statusCode == 200) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Data personal & SIM berhasil disimpan")),
+            const SnackBar(
+                content: Text("Data personal & SIM berhasil disimpan")),
           );
           Navigator.pop(context, true);
         } else if (response.statusCode == 401) {
-          // Refresh gagal sementara (jaringan/server), bukan sesi mati.
           throw Exception(
               "Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.");
         } else if (response.statusCode == 422) {
-          // 🟢 TAMBAHAN: Error validasi (nomor HP/SIM sudah dipakai, format salah, dll)
-          // Ambil pesan asli dari backend, bukan pesan generic.
-          final String message = _extractValidationMessage(responseData, response.statusCode);
+          final String message = _extractValidationMessage(
+              responseData, response.statusCode);
           throw Exception(message);
         } else {
-          final String message = responseData['message'] ?? "Gagal menyimpan profil (${response.statusCode})";
+          final String message = responseData['message'] ??
+              "Gagal menyimpan profil (${response.statusCode})";
           throw Exception(message);
         }
       } on TimeoutException {
@@ -418,7 +352,7 @@ class _ProfilPageState extends State<ProfilPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: _dangerColor,
+        backgroundColor: _dangerColor, // semantic
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -427,7 +361,6 @@ class _ProfilPageState extends State<ProfilPage> {
     );
   }
 
-  /// ================= BOTTOM NAVIGATION =================
   void _onBottomTap(int index) {
     if (index == 0) {
       Navigator.pushReplacementNamed(context, '/home');
@@ -440,23 +373,27 @@ class _ProfilPageState extends State<ProfilPage> {
     }
   }
 
-  /// ================= HELPER UI: SECTION CARD =================
+  // ================= HELPER UI: SECTION CARD =================
   Widget _sectionCard({
     required String title,
     required IconData icon,
-    required Color iconColor,
+    required Color iconColor, // brand per section, tetap
     String? subtitle,
     required List<Widget> children,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -470,7 +407,8 @@ class _ProfilPageState extends State<ProfilPage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.12, tetap kelihatan di dark
+                  color: iconColor.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, color: iconColor, size: 20),
@@ -482,10 +420,11 @@ class _ProfilPageState extends State<ProfilPage> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15.5,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E293B),
+                        // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                        color: colorScheme.onSurface,
                       ),
                     ),
                     if (subtitle != null)
@@ -493,7 +432,11 @@ class _ProfilPageState extends State<ProfilPage> {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
                           subtitle,
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          style: TextStyle(
+                            fontSize: 12,
+                            // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                            color: colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                   ],
@@ -508,16 +451,17 @@ class _ProfilPageState extends State<ProfilPage> {
     );
   }
 
-  /// ================= HELPER UI: FOTO DOKUMEN (KTP / SIM) DENGAN ZOOM =================
+  // ================= HELPER UI: FOTO DOKUMEN (KTP / SIM) =================
   Widget _documentPhotoPicker({
     required String label,
-    required Color color,
+    required Color color, // brand per dokumen, tetap
     required IconData placeholderIcon,
     required File? localImage,
     required String? remoteUrl,
     required VoidCallback onPick,
     required String heroTag,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     final bool hasImage = localImage != null || remoteUrl != null;
 
     return Column(
@@ -525,18 +469,31 @@ class _ProfilPageState extends State<ProfilPage> {
       children: [
         Row(
           children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
+                // 🟢 Tambahkan onSurface (sebelumnya default)
+                color: colorScheme.onSurface,
+              ),
+            ),
             const SizedBox(width: 6),
             if (hasImage)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
+                  // 🟢 Hijau semantic, boost 0.1 → 0.15
+                  color: Colors.green.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text(
                   "Terupload",
-                  style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.green, // semantic
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
           ],
@@ -553,14 +510,17 @@ class _ProfilPageState extends State<ProfilPage> {
                   child: Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(14),
+                      // 🟢 Border brand per dokumen — tetap
                       border: Border.all(color: color, width: 1.5),
-                      color: color.withOpacity(0.05),
+                      // 🟢 0.05 → 0.10, tetap kelihatan di dark
+                      color: color.withOpacity(0.10),
                     ),
                     child: localImage == null
                         ? (remoteUrl != null
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(14),
-                                child: Image.network(remoteUrl, fit: BoxFit.cover),
+                                child:
+                                    Image.network(remoteUrl, fit: BoxFit.cover),
                               )
                             : Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -572,7 +532,7 @@ class _ProfilPageState extends State<ProfilPage> {
                                     style: TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
-                                      color: color,
+                                      color: color, // brand
                                     ),
                                   ),
                                 ],
@@ -585,7 +545,6 @@ class _ProfilPageState extends State<ProfilPage> {
                 ),
               ),
             ),
-            // Tombol zoom & ganti foto, muncul di pojok kanan-bawah kalau sudah ada gambar
             if (hasImage)
               Positioned(
                 right: 8,
@@ -612,7 +571,12 @@ class _ProfilPageState extends State<ProfilPage> {
     );
   }
 
-  Widget _circleIconButton({required IconData icon, required VoidCallback onTap}) {
+  /// Tombol bulat overlay di atas FOTO — sengaja tetap hitam semi-transparan
+  /// + ikon putih, karena kontras di atas foto apapun (terang/gelap).
+  Widget _circleIconButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
     return Material(
       color: Colors.black.withOpacity(0.55),
       shape: const CircleBorder(),
@@ -638,6 +602,8 @@ class _ProfilPageState extends State<ProfilPage> {
     Widget? suffixIcon,
     String? Function(String?)? validator,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return TextFormField(
       controller: controller,
       readOnly: readOnly,
@@ -645,12 +611,26 @@ class _ProfilPageState extends State<ProfilPage> {
       keyboardType: keyboardType,
       maxLines: maxLines,
       validator: validator,
-      style: const TextStyle(fontSize: 14.5),
+      style: TextStyle(
+        fontSize: 14.5,
+        // 🟢 Teks input ikut tema
+        color: colorScheme.onSurface,
+      ),
       decoration: InputDecoration(
         labelText: label,
         filled: true,
-        fillColor: readOnly ? const Color(0xFFF1F5F9) : const Color(0xFFF8FAFC),
-        prefixIcon: Icon(icon, size: 20, color: Colors.grey.shade600),
+        // 🟢 readOnly pakai surfaceContainerHigh (sedikit lebih "muted"),
+        //    editable pakai surfaceContainerHighest (paling standout = input).
+        //    Keduanya tetap adaptif light & dark.
+        fillColor: readOnly
+            ? colorScheme.surfaceContainerHigh
+            : colorScheme.surfaceContainerHighest,
+        prefixIcon: Icon(
+          icon,
+          size: 20,
+          // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+          color: colorScheme.onSurfaceVariant,
+        ),
         suffixIcon: suffixIcon,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -658,45 +638,59 @@ class _ProfilPageState extends State<ProfilPage> {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
+          // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
+          // 🟢 Brand biru — tetap
           borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        ),
+        labelStyle: TextStyle(
+          // 🟢 Ganti default ke onSurfaceVariant untuk konsistensi
+          color: colorScheme.onSurfaceVariant,
+          fontSize: 13.5,
         ),
       ),
     );
   }
 
-  /// ================= HELPER UI: FIELD NOMOR HP INTERNASIONAL =================
-  /// 🟢 TAMBAHAN: pengganti _styledField khusus untuk nomor HP, dengan
-  /// dropdown kode negara. Hasil akhirnya (phone.completeNumber) selalu
-  /// berupa format "+<kodenegara><nomor>", disimpan ke _completePhoneNumber.
   Widget _phoneField() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return IntlPhoneField(
-      initialCountryCode: 'ID', // default Indonesia, user bisa ganti sendiri
+      initialCountryCode: 'ID',
       initialValue: _hpController.text,
-      style: const TextStyle(fontSize: 14.5),
-      dropdownTextStyle: const TextStyle(fontSize: 14.5),
+      // 🟢 Teks input ikut tema
+      style: TextStyle(fontSize: 14.5, color: colorScheme.onSurface),
+      // 🟢 Kode negara dropdown ikut tema
+      dropdownTextStyle:
+          TextStyle(fontSize: 14.5, color: colorScheme.onSurface),
       decoration: InputDecoration(
         labelText: "Nomor HP / WhatsApp",
         filled: true,
-        fillColor: const Color(0xFFF8FAFC),
+        // 🟢 Ganti Color(0xFFF8FAFC) → surfaceContainerHighest
+        fillColor: colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
+          // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
+          // 🟢 Brand biru — tetap
           borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        ),
+        labelStyle: TextStyle(
+          color: colorScheme.onSurfaceVariant,
+          fontSize: 13.5,
         ),
       ),
       onChanged: (phone) {
-        // completeNumber selalu diawali '+', mis. "+6281234567890"
         _completePhoneNumber = phone.completeNumber;
       },
       validator: (phone) {
@@ -713,8 +707,8 @@ class _ProfilPageState extends State<ProfilPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Versi resolusi menengah untuk avatar bulat kecil, dan resolusi tinggi
-    // khusus saat dibuka full-screen supaya tetap tajam walau di-zoom.
+    final colorScheme = Theme.of(context).colorScheme;
+
     final String? avatarThumb = _hiResAvatarUrl(avatarUrl, size: 200);
     final String? avatarFull = _hiResAvatarUrl(avatarUrl, size: 720);
 
@@ -723,245 +717,296 @@ class _ProfilPageState extends State<ProfilPage> {
       currentIndex: 3,
       onTap: _onBottomTap,
       content: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Container(
-              color: const Color(0xFFF4F6F9),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      /// ================= AVATAR (ZOOMABLE) =================
-                      Center(
-                        child: Column(
-                          children: [
-                            GestureDetector(
-                              onTap: avatarUrl != null
-                                  ? () => _openImageViewer(
-                                        networkUrl: avatarFull,
-                                        heroTag: 'avatar-photo',
-                                        title: 'Foto Profil',
-                                      )
-                                  : null,
-                              child: Stack(
-                                children: [
-                                  Hero(
-                                    tag: 'avatar-photo',
-                                    child: Container(
-                                      padding: const EdgeInsets.all(3),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        gradient: const LinearGradient(
-                                          colors: [_primaryColor, Color(0xFF60A5FA)],
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: _primaryColor.withOpacity(0.25),
-                                            blurRadius: 14,
-                                            offset: const Offset(0, 6),
-                                          ),
+          ? const Center(
+              child: CircularProgressIndicator(color: _primaryColor))
+          // 🟢 DIHAPUS: Container(color: 0xFFF4F6F9) — pakai default tema
+          : SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    /// ================= AVATAR (ZOOMABLE) =================
+                    Center(
+                      child: Column(
+                        children: [
+                          GestureDetector(
+                            onTap: avatarUrl != null
+                                ? () => _openImageViewer(
+                                      networkUrl: avatarFull,
+                                      heroTag: 'avatar-photo',
+                                      title: 'Foto Profil',
+                                    )
+                                : null,
+                            child: Stack(
+                              children: [
+                                // ⚠️ ZONA BRAND: gradient biru + white ring
+                                // + zoom badge — SENGAJA tetap. Latarnya
+                                // selalu gradient biru, semua putih & primary
+                                // sudah kontras di kedua mode.
+                                Hero(
+                                  tag: 'avatar-photo',
+                                  child: Container(
+                                    padding: const EdgeInsets.all(3),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: const LinearGradient(
+                                        colors: [
+                                          _primaryColor,
+                                          Color(0xFF60A5FA)
                                         ],
                                       ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: _primaryColor
+                                              .withOpacity(0.25),
+                                          blurRadius: 14,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: CircleAvatar(
+                                      radius: 48,
+                                      // 🟢 Ring putih — design frame di atas
+                                      // gradient biru, tetap
+                                      backgroundColor: Colors.white,
                                       child: CircleAvatar(
-                                        radius: 48,
-                                        backgroundColor: Colors.white,
-                                        child: CircleAvatar(
-                                          radius: 45,
-                                          backgroundColor: Colors.blue.withOpacity(0.08),
-                                          backgroundImage: avatarThumb != null
-                                              ? NetworkImage(avatarThumb)
-                                              : const AssetImage("assets/anya.jpg") as ImageProvider,
-                                        ),
+                                        radius: 45,
+                                        // 🟢 Fallback tint brand (sebelumnya
+                                        // Colors.blue.withOpacity(0.08))
+                                        backgroundColor: _primaryColor
+                                            .withOpacity(0.10),
+                                        backgroundImage: avatarThumb != null
+                                            ? NetworkImage(avatarThumb)
+                                            : const AssetImage(
+                                                    "assets/anya.jpg")
+                                                as ImageProvider,
                                       ),
                                     ),
                                   ),
-                                  if (avatarUrl != null)
-                                    Positioned(
-                                      right: 2,
-                                      bottom: 2,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(6),
-                                        decoration: BoxDecoration(
-                                          color: _primaryColor,
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: Colors.white, width: 2),
-                                        ),
-                                        child: const Icon(Icons.zoom_in_rounded, size: 14, color: Colors.white),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              _namaController.text.isNotEmpty ? _namaController.text : 'Pengguna',
-                              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              "Tersinkron dari akun Google · Ketuk foto untuk memperbesar",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      /// ================= AKUN (Nama & Email) =================
-                      _sectionCard(
-                        title: "Informasi Akun",
-                        subtitle: "Bersumber dari akun Google, tidak bisa diubah",
-                        icon: Icons.account_circle_rounded,
-                        iconColor: _primaryColor,
-                        children: [
-                          _styledField(
-                            controller: _namaController,
-                            label: "Nama",
-                            icon: Icons.person_outline,
-                            readOnly: true,
-                          ),
-                          const SizedBox(height: 12),
-                          _styledField(
-                            controller: _emailController,
-                            label: "Email",
-                            icon: Icons.email_outlined,
-                            readOnly: true,
-                          ),
-                        ],
-                      ),
-
-                      /// ================= DATA PERSONAL =================
-                      _sectionCard(
-                        title: "Data Personal",
-                        subtitle: "Digunakan untuk keperluan verifikasi & komunikasi",
-                        icon: Icons.badge_outlined,
-                        iconColor: _accentColor,
-                        children: [
-                          // 🟢 UBAH: field HP sekarang pakai IntlPhoneField
-                          _phoneField(),
-                          const SizedBox(height: 12),
-                          _styledField(
-                            controller: _tglLahirController,
-                            label: "Tanggal Lahir",
-                            icon: Icons.cake_outlined,
-                            readOnly: true,
-                            onTap: _pickDate,
-                            suffixIcon: const Icon(Icons.calendar_month, size: 20),
-                            validator: (v) =>
-                                v == null || v.isEmpty ? "Tanggal lahir wajib diisi" : null,
-                          ),
-                          const SizedBox(height: 12),
-                          _styledField(
-                            controller: _addressController,
-                            label: "Alamat Lengkap",
-                            icon: Icons.home_outlined,
-                            maxLines: 3,
-                            validator: (v) => v == null || v.isEmpty ? "Alamat wajib diisi" : null,
-                          ),
-                        ],
-                      ),
-
-                      /// ================= KTP =================
-                      _sectionCard(
-                        title: "Foto KTP",
-                        subtitle: "Wajib diupload, pastikan foto jelas dan tidak buram",
-                        icon: Icons.credit_card_rounded,
-                        iconColor: _primaryColor,
-                        children: [
-                          _documentPhotoPicker(
-                            label: "Foto KTP",
-                            color: _primaryColor,
-                            placeholderIcon: Icons.credit_card,
-                            localImage: ktpImage,
-                            remoteUrl: ktpUrl,
-                            onPick: _uploadKtp,
-                            heroTag: 'ktp-photo',
-                          ),
-                        ],
-                      ),
-
-                      /// ================= BAGIAN SIM =================
-                      _sectionCard(
-                        title: "Informasi SIM",
-                        subtitle: "Wajib untuk Driver/Penyewa sebelum bisa membuat pesanan",
-                        icon: Icons.directions_car_filled_rounded,
-                        iconColor: _accentColor,
-                        children: [
-                          _styledField(
-                            controller: _simNumberController,
-                            label: "Nomor SIM",
-                            icon: Icons.numbers_rounded,
-                            keyboardType: TextInputType.number,
-                            validator: (v) => v == null || v.isEmpty ? "Nomor SIM wajib diisi" : null,
-                          ),
-                          const SizedBox(height: 12),
-                          _styledField(
-                            controller: _simTypeController,
-                            label: "Golongan SIM (Contoh: A, C, B1)",
-                            icon: Icons.category_outlined,
-                            validator: (v) => v == null || v.isEmpty ? "Golongan SIM wajib diisi" : null,
-                          ),
-                          const SizedBox(height: 12),
-                          _styledField(
-                            controller: _simExpiredController,
-                            label: "Masa Berlaku SIM",
-                            icon: Icons.event_busy_outlined,
-                            readOnly: true,
-                            onTap: _pickSimExpiredDate,
-                            suffixIcon: const Icon(Icons.calendar_month, size: 20),
-                            validator: (v) =>
-                                v == null || v.isEmpty ? "Masa berlaku SIM wajib diisi" : null,
-                          ),
-                          const SizedBox(height: 16),
-                          _documentPhotoPicker(
-                            label: "Foto SIM",
-                            color: _accentColor,
-                            placeholderIcon: Icons.directions_car,
-                            localImage: simImage,
-                            remoteUrl: simUrl,
-                            onPick: _uploadSim,
-                            heroTag: 'sim-photo',
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      /// ================= SAVE BUTTON =================
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _primaryColor,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: _isSaving ? null : _saveProfile,
-                          child: _isSaving
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.4,
-                                    valueColor: AlwaysStoppedAnimation(Colors.white),
-                                  ),
-                                )
-                              : const Text(
-                                  "Simpan Data Personal & SIM",
-                                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
                                 ),
-                        ),
+                                if (avatarUrl != null)
+                                  Positioned(
+                                    right: 2,
+                                    bottom: 2,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        // 🟢 Brand primary — tetap
+                                        color: _primaryColor,
+                                        shape: BoxShape.circle,
+                                        // 🟢 Border putih — di atas gradient
+                                        //    biru, tetap
+                                        border: Border.all(
+                                            color: Colors.white, width: 2),
+                                      ),
+                                      child: const Icon(
+                                        Icons.zoom_in_rounded,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _namaController.text.isNotEmpty
+                                ? _namaController.text
+                                : 'Pengguna',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              // 🟢 Tambahkan onSurface (default sudah tapi
+                              // eksplisit untuk konsistensi)
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            "Tersinkron dari akun Google · Ketuk foto untuk memperbesar",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 12,
+                              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    /// ================= AKUN =================
+                    _sectionCard(
+                      title: "Informasi Akun",
+                      subtitle:
+                          "Bersumber dari akun Google, tidak bisa diubah",
+                      icon: Icons.account_circle_rounded,
+                      iconColor: _primaryColor,
+                      children: [
+                        _styledField(
+                          controller: _namaController,
+                          label: "Nama",
+                          icon: Icons.person_outline,
+                          readOnly: true,
+                        ),
+                        const SizedBox(height: 12),
+                        _styledField(
+                          controller: _emailController,
+                          label: "Email",
+                          icon: Icons.email_outlined,
+                          readOnly: true,
+                        ),
+                      ],
+                    ),
+
+                    /// ================= DATA PERSONAL =================
+                    _sectionCard(
+                      title: "Data Personal",
+                      subtitle:
+                          "Digunakan untuk keperluan verifikasi & komunikasi",
+                      icon: Icons.badge_outlined,
+                      iconColor: _accentColor,
+                      children: [
+                        _phoneField(),
+                        const SizedBox(height: 12),
+                        _styledField(
+                          controller: _tglLahirController,
+                          label: "Tanggal Lahir",
+                          icon: Icons.cake_outlined,
+                          readOnly: true,
+                          onTap: _pickDate,
+                          suffixIcon:
+                              const Icon(Icons.calendar_month, size: 20),
+                          validator: (v) => v == null || v.isEmpty
+                              ? "Tanggal lahir wajib diisi"
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                        _styledField(
+                          controller: _addressController,
+                          label: "Alamat Lengkap",
+                          icon: Icons.home_outlined,
+                          maxLines: 3,
+                          validator: (v) => v == null || v.isEmpty
+                              ? "Alamat wajib diisi"
+                              : null,
+                        ),
+                      ],
+                    ),
+
+                    /// ================= KTP =================
+                    _sectionCard(
+                      title: "Foto KTP",
+                      subtitle:
+                          "Wajib diupload, pastikan foto jelas dan tidak buram",
+                      icon: Icons.credit_card_rounded,
+                      iconColor: _primaryColor,
+                      children: [
+                        _documentPhotoPicker(
+                          label: "Foto KTP",
+                          color: _primaryColor,
+                          placeholderIcon: Icons.credit_card,
+                          localImage: ktpImage,
+                          remoteUrl: ktpUrl,
+                          onPick: _uploadKtp,
+                          heroTag: 'ktp-photo',
+                        ),
+                      ],
+                    ),
+
+                    /// ================= SIM =================
+                    _sectionCard(
+                      title: "Informasi SIM",
+                      subtitle:
+                          "Wajib untuk Driver/Penyewa sebelum bisa membuat pesanan",
+                      icon: Icons.directions_car_filled_rounded,
+                      iconColor: _accentColor,
+                      children: [
+                        _styledField(
+                          controller: _simNumberController,
+                          label: "Nomor SIM",
+                          icon: Icons.numbers_rounded,
+                          keyboardType: TextInputType.number,
+                          validator: (v) => v == null || v.isEmpty
+                              ? "Nomor SIM wajib diisi"
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                        _styledField(
+                          controller: _simTypeController,
+                          label: "Golongan SIM (Contoh: A, C, B1)",
+                          icon: Icons.category_outlined,
+                          validator: (v) => v == null || v.isEmpty
+                              ? "Golongan SIM wajib diisi"
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                        _styledField(
+                          controller: _simExpiredController,
+                          label: "Masa Berlaku SIM",
+                          icon: Icons.event_busy_outlined,
+                          readOnly: true,
+                          onTap: _pickSimExpiredDate,
+                          suffixIcon:
+                              const Icon(Icons.calendar_month, size: 20),
+                          validator: (v) => v == null || v.isEmpty
+                              ? "Masa berlaku SIM wajib diisi"
+                              : null,
+                        ),
+                        const SizedBox(height: 16),
+                        _documentPhotoPicker(
+                          label: "Foto SIM",
+                          color: _accentColor,
+                          placeholderIcon: Icons.directions_car,
+                          localImage: simImage,
+                          remoteUrl: simUrl,
+                          onPick: _uploadSim,
+                          heroTag: 'sim-photo',
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    /// ================= SAVE BUTTON =================
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          // 🟢 Brand biru, tetap sama di kedua mode
+                          backgroundColor: _primaryColor,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: _isSaving ? null : _saveProfile,
+                        child: _isSaving
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
+                                ),
+                              )
+                            : const Text(
+                                "Simpan Data Personal & SIM",
+                                style: TextStyle(
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -969,9 +1014,8 @@ class _ProfilPageState extends State<ProfilPage> {
   }
 }
 
-/// ================= FULLSCREEN ZOOMABLE IMAGE VIEWER =================
-/// Widget terpisah supaya bisa dipakai ulang untuk avatar, KTP, dan SIM.
-/// Mendukung pinch-to-zoom, drag, dan double-tap untuk zoom in/out.
+/// ⚠️ FULLSCREEN ZOOMABLE IMAGE VIEWER — SENGAJA tidak diubah.
+/// Latar hitam & teks putih adalah standar UX photo-viewer di kedua mode.
 class _ZoomableImageViewer extends StatefulWidget {
   final String? networkUrl;
   final File? localFile;
@@ -1045,7 +1089,8 @@ class _ZoomableImageViewerState extends State<_ZoomableImageViewer>
         backgroundColor: Colors.black,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        title: Text(widget.title,
+            style: const TextStyle(color: Colors.white, fontSize: 16)),
       ),
       body: GestureDetector(
         onDoubleTapDown: (details) => _doubleTapDetails = details,

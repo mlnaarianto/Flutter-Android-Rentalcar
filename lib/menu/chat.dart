@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:rentalcar/config/api_config.dart';
-import 'package:rentalcar/services/api_client.dart'; // 🟢 FASE 5: refresh token otomatis
+import 'package:rentalcar/services/api_client.dart';
 
 class ChatPage extends StatefulWidget {
   final String chatId;
@@ -11,9 +11,6 @@ class ChatPage extends StatefulWidget {
   final String receiverId;
   final String receiverName;
   final String? receiverAvatarUrl;
- 
-  // otomatis oleh ApiClient, jadi tidak perlu dioper dari halaman pemanggil
-  // (token yang dioper akan basi kalau chat dibuka lama).
 
   const ChatPage({
     super.key,
@@ -44,16 +41,12 @@ class _ChatPageState extends State<ChatPage> {
 
   static const String _avatarHeroTag = 'chat-receiver-avatar';
   static const Color _primaryColor = Color(0xFF2563EB);
-  static const Color _bgColor = Color(0xFFF4F6F9);
+  // 🟢 Bubble "punya saya" versi LIGHT mode — dipertahankan persis.
+  // Di dark mode akan diganti via _myBubbleBg(context).
   static const Color _myBubbleColor = Color(0xFFDCEBFF);
+  // 🟢 DIHAPUS: _bgColor — scaffold pakai surfaceContainerLow,
+  // input field pakai surfaceContainerHighest.
 
-  // ================= KONFIGURASI REVERB =================
-  // Port & app key Reverb TIDAK ikut ApiConfig.baseUrl (beda port dari API
-  // biasa), jadi tetap dikonstantakan di sini. Tapi HOST dan SKEMA (ws/wss)
-  // diturunkan otomatis dari ApiConfig.baseUrl lewat getter _reverbUrl di
-  // bawah -- supaya kalau IP di api_config.dart diganti, atau baseUrl sudah
-  // pindah ke https:// (production), koneksi WebSocket otomatis ikut tanpa
-  // perlu ubah dua tempat terpisah.
   static const String _reverbPort = '9090';
   static const String _reverbAppKey = '27d6a6d4761caf333da8';
 
@@ -67,16 +60,34 @@ class _ChatPageState extends State<ChatPage> {
     return '$base/broadcasting/auth';
   }
 
-  /// Membentuk URL WebSocket Reverb dari ApiConfig.baseUrl.
-  /// - Host diambil dari host baseUrl (mis. 192.168.189.4), bukan hardcode.
-  /// - Skema mengikuti baseUrl: http -> ws (aman untuk LAN/dev),
-  ///   https -> wss (WAJIB untuk production, supaya isi chat terenkripsi).
   String get _reverbUrl {
     final apiUri = Uri.parse(ApiConfig.baseUrl);
     final scheme = apiUri.scheme == 'https' ? 'wss' : 'ws';
     final host = apiUri.host;
     return '$scheme://$host:$_reverbPort/app/$_reverbAppKey'
         '?protocol=7&client=js&version=8.4.0';
+  }
+
+  // ================= HELPER: WARNA ADAPTIF BUBBLE =================
+  /// Background bubble "punya saya": light → biru muda (asli),
+  /// dark → biru brand dengan opacity 0.30 (tampak biru gelap di atas
+  /// scaffold gelap, tidak menyilaukan).
+  Color _myBubbleBg(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? _primaryColor.withOpacity(0.30) : _myBubbleColor;
+  }
+
+  /// Teks di dalam bubble "punya saya": light → gelap (asli),
+  /// dark → putih (kontras di atas biru gelap).
+  Color _myBubbleFg(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? Colors.white : const Color(0xFF1E293B);
+  }
+
+  /// Timestamp di dalam bubble "punya saya".
+  Color _myBubbleTimeFg(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? Colors.white70 : Colors.grey.shade500;
   }
 
   @override
@@ -91,9 +102,6 @@ class _ChatPageState extends State<ChatPage> {
 
     _fetchInitialMessages();
     _resolveRealChatId().then((_) {
-      // 🟢 FASE 5: kalau halaman sudah ditutup (atau sesi berakhir dan app
-      // dipindah ke LoginPage) selama request berjalan, jangan buka
-      // WebSocket baru -- tidak akan ada yang menutupnya.
       if (!mounted) return;
       _initReverbWebSocket();
     });
@@ -107,19 +115,6 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  /// Menyeragamkan bentuk data pesan dari 3 sumber berbeda (fetch riwayat,
-  /// event WebSocket 'message.sent', dan response setelah kirim pesan)
-  /// menjadi satu format konsisten yang dipakai UI.
-  ///
-  /// PENTING: nama pengirim SENGAJA tidak diambil dari field 'sender_name'
-  /// backend, karena backend (ChatController::getMessages/sendMessage,
-  /// serta payload event MessageSent yang di-broadcast tanpa relasi sender
-  /// ter-load) tidak pernah mengirim field flat 'sender_name' itu -- yang
-  /// ada hanyalah relasi nested 'sender.name' (kadang bahkan tidak ada sama
-  /// sekali di payload socket). Karena room chat ini selalu 1-lawan-1 (lihat
-  /// constructor ChatPage: currentUserId vs receiverId), nama pengirim bisa
-  /// disimpulkan dengan aman hanya dari sender_id, tanpa bergantung ke
-  /// bentuk response backend yang bisa berubah.
   Map<String, dynamic> _normalizeMessage(Map<String, dynamic> raw) {
     final String senderId = raw['sender_id']?.toString() ?? '';
     final String senderName = senderId == widget.currentUserId
@@ -141,9 +136,6 @@ class _ChatPageState extends State<ChatPage> {
         Uri.parse('${ApiConfig.baseUrl}/chats/${widget.chatId}/messages'),
       );
 
-      // 🟢 FASE 5: cek mounted setelah await. Dengan refresh token, request
-      // bisa lebih lama (refresh + retry), jadi peluang halaman sudah
-      // ditutup sebelum respons datang lebih besar.
       if (!mounted) return;
 
       if (response.statusCode == 200) {
@@ -297,8 +289,6 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.clear();
 
     try {
-      // Content-Type JSON tetap diset di sini: ApiClient sengaja tidak
-      // mengaturnya (hanya Accept dan Authorization).
       final response = await ApiClient.instance.post(
         Uri.parse('${ApiConfig.baseUrl}/messages'),
         headers: {'Content-Type': 'application/json'},
@@ -343,7 +333,7 @@ class _ChatPageState extends State<ChatPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Pesan gagal terkirim. Coba lagi.'),
-            backgroundColor: Colors.red,
+            backgroundColor: Colors.red, // 🟢 semantic error
             behavior: SnackBarBehavior.floating,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -400,23 +390,32 @@ class _ChatPageState extends State<ChatPage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
+        // 🟢 Warna default dari theme (surface di bottom sheet)
+        final colorScheme = Theme.of(context).colorScheme;
+
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading:
-                    const Icon(Icons.delete_forever_rounded, color: Colors.red),
-                title: const Text('Hapus pesan',
-                    style: TextStyle(color: Colors.red)),
+                leading: Icon(Icons.delete_forever_rounded,
+                    color: colorScheme.error),
+                title: Text(
+                  'Hapus pesan',
+                  style: TextStyle(color: colorScheme.error),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _deleteMessage(data);
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.close_rounded),
-                title: const Text('Batal'),
+                leading: Icon(Icons.close_rounded,
+                    color: colorScheme.onSurfaceVariant),
+                title: Text(
+                  'Batal',
+                  style: TextStyle(color: colorScheme.onSurface),
+                ),
                 onTap: () => Navigator.pop(context),
               ),
               const SizedBox(height: 8),
@@ -488,12 +487,21 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bool isDark = theme.brightness == Brightness.dark;
+
     final bool hasAvatar = widget.receiverAvatarUrl != null &&
         widget.receiverAvatarUrl!.isNotEmpty;
 
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 Ganti _bgColor → surfaceContainerLow
+      // light ≈ #F1F3FA (mirip F4F6F9 asli), dark ≈ #141A20
+      backgroundColor: colorScheme.surfaceContainerLow,
       appBar: AppBar(
+        // ⚠️ ZONA BIRU BRAND: gradient solid biru, teks putih,
+        // avatar transparan putih — SENGAJA tetap di kedua mode.
+        // Ini pola umum chat app (WhatsApp, Telegram) & kontrasnya OK.
         backgroundColor: _primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -507,8 +515,9 @@ class _ChatPageState extends State<ChatPage> {
                 child: CircleAvatar(
                   radius: 18,
                   backgroundColor: Colors.white.withOpacity(0.2),
-                  backgroundImage:
-                      hasAvatar ? NetworkImage(widget.receiverAvatarUrl!) : null,
+                  backgroundImage: hasAvatar
+                      ? NetworkImage(widget.receiverAvatarUrl!)
+                      : null,
                   child: !hasAvatar
                       ? Text(
                           _initials(widget.receiverName),
@@ -551,7 +560,8 @@ class _ChatPageState extends State<ChatPage> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: _primaryColor.withOpacity(0.08),
+                                  // 🟢 0.08 → 0.15, biar kelihatan di dark
+                                  color: _primaryColor.withOpacity(0.15),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.lock_outline_rounded,
@@ -561,7 +571,8 @@ class _ChatPageState extends State<ChatPage> {
                               Text(
                                 "Pesan aman dan terenkripsi",
                                 style: TextStyle(
-                                  color: Colors.grey.shade700,
+                                  // 🟢 Ganti Colors.grey.shade700 → onSurface
+                                  color: colorScheme.onSurface,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13.5,
                                 ),
@@ -571,7 +582,10 @@ class _ChatPageState extends State<ChatPage> {
                                 "Silakan mulai percakapan dengan ${widget.receiverName}.",
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                    color: Colors.grey.shade500, fontSize: 12),
+                                  // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
                               ),
                             ],
                           ),
@@ -579,8 +593,8 @@ class _ChatPageState extends State<ChatPage> {
                       )
                     : ListView.builder(
                         controller: _scrollController,
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 15),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final data = _messages[index];
@@ -594,10 +608,6 @@ class _ChatPageState extends State<ChatPage> {
                           DateTime? dateTime;
                           var rawTime = data['created_at'];
                           if (rawTime != null) {
-                            // .toLocal() WAJIB: Laravel menyimpan & mengirim
-                            // timestamp dalam UTC. Tanpa ini, jam yang tampil
-                            // di bubble & separator tanggal akan meleset
-                            // sejumlah offset timezone server vs device user.
                             dateTime =
                                 DateTime.tryParse(rawTime.toString())?.toLocal();
                             if (dateTime != null) {
@@ -618,13 +628,27 @@ class _ChatPageState extends State<ChatPage> {
                                     DateTime.tryParse(prevRaw.toString())
                                         ?.toLocal();
                                 if (prevDate != null) {
-                                  showDateSeparator = prevDate.year != dateTime.year ||
+                                  showDateSeparator = prevDate.year !=
+                                          dateTime.year ||
                                       prevDate.month != dateTime.month ||
                                       prevDate.day != dateTime.day;
                                 }
                               }
                             }
                           }
+
+                          // 🟢 Warna bubble adaptif
+                          final bubbleBg = isMe
+                              ? _myBubbleBg(context)
+                              : (isDark
+                                  ? colorScheme.surfaceContainerHigh
+                                  : Colors.white);
+                          final bubbleFg = isMe
+                              ? _myBubbleFg(context)
+                              : colorScheme.onSurface;
+                          final timeFg = isMe
+                              ? _myBubbleTimeFg(context)
+                              : colorScheme.onSurfaceVariant;
 
                           return Column(
                             children: [
@@ -636,11 +660,16 @@ class _ChatPageState extends State<ChatPage> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 12, vertical: 5),
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
+                                      // 🟢 Light: putih (asli);
+                                      // dark: surfaceContainerHigh
+                                      color: isDark
+                                          ? colorScheme.surfaceContainerHigh
+                                          : Colors.white,
                                       borderRadius: BorderRadius.circular(20),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black.withOpacity(0.04),
+                                          color: colorScheme.shadow
+                                              .withOpacity(0.06),
                                           blurRadius: 6,
                                           offset: const Offset(0, 2),
                                         ),
@@ -651,7 +680,8 @@ class _ChatPageState extends State<ChatPage> {
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.grey.shade600,
+                                        // 🟢 Ganti Colors.grey.shade600
+                                        color: colorScheme.onSurfaceVariant,
                                       ),
                                     ),
                                   ),
@@ -661,18 +691,23 @@ class _ChatPageState extends State<ChatPage> {
                                     ? Alignment.centerRight
                                     : Alignment.centerLeft,
                                 child: GestureDetector(
-                                  onLongPress:
-                                      isMe ? () => _showDeleteOptions(data) : null,
+                                  onLongPress: isMe
+                                      ? () => _showDeleteOptions(data)
+                                      : null,
                                   child: Container(
                                     constraints: BoxConstraints(
-                                      maxWidth:
-                                          MediaQuery.of(context).size.width * 0.75,
+                                      maxWidth: MediaQuery.of(context)
+                                              .size
+                                              .width *
+                                          0.75,
                                     ),
-                                    margin: const EdgeInsets.symmetric(vertical: 3),
+                                    margin:
+                                        const EdgeInsets.symmetric(vertical: 3),
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 13, vertical: 9),
                                     decoration: BoxDecoration(
-                                      color: isMe ? _myBubbleColor : Colors.white,
+                                      // 🟢 Adaptif per mode
+                                      color: bubbleBg,
                                       borderRadius: BorderRadius.only(
                                         topLeft: const Radius.circular(14),
                                         topRight: const Radius.circular(14),
@@ -683,19 +718,22 @@ class _ChatPageState extends State<ChatPage> {
                                       ),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black.withOpacity(0.04),
+                                          color: colorScheme.shadow
+                                              .withOpacity(0.06),
                                           blurRadius: 4,
                                           offset: const Offset(0, 2),
                                         ),
                                       ],
                                     ),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
                                       children: [
                                         Text(
                                           text,
-                                          style: const TextStyle(
-                                            color: Color(0xFF1E293B),
+                                          style: TextStyle(
+                                            // 🟢 Adaptif per mode
+                                            color: bubbleFg,
                                             fontSize: 14.5,
                                             height: 1.3,
                                           ),
@@ -707,7 +745,8 @@ class _ChatPageState extends State<ChatPage> {
                                             Text(
                                               timeString,
                                               style: TextStyle(
-                                                color: Colors.grey.shade500,
+                                                // 🟢 Adaptif per mode
+                                                color: timeFg,
                                                 fontSize: 10,
                                               ),
                                             ),
@@ -716,6 +755,7 @@ class _ChatPageState extends State<ChatPage> {
                                               const Icon(
                                                 Icons.done_all_rounded,
                                                 size: 13,
+                                                // 🟢 Brand biru — tetap
                                                 color: _primaryColor,
                                               ),
                                             ],
@@ -736,8 +776,12 @@ class _ChatPageState extends State<ChatPage> {
             child: Container(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: Colors.grey.shade200)),
+                // 🟢 Ganti Colors.white → colorScheme.surface
+                color: colorScheme.surface,
+                border: Border(
+                  // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+                  top: BorderSide(color: colorScheme.outlineVariant),
+                ),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -748,7 +792,8 @@ class _ChatPageState extends State<ChatPage> {
                           const BoxConstraints(minHeight: 44, maxHeight: 120),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
-                        color: _bgColor,
+                        // 🟢 Ganti _bgColor → surfaceContainerHighest
+                        color: colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(24),
                       ),
                       child: TextField(
@@ -756,12 +801,19 @@ class _ChatPageState extends State<ChatPage> {
                         minLines: 1,
                         maxLines: 5,
                         textCapitalization: TextCapitalization.sentences,
-                        style: const TextStyle(fontSize: 14.5),
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          // 🟢 Teks input ikut tema
+                          color: colorScheme.onSurface,
+                        ),
                         decoration: InputDecoration(
                           hintText: "Ketik pesan...",
                           border: InputBorder.none,
                           isCollapsed: true,
-                          hintStyle: TextStyle(color: Colors.grey.shade500),
+                          hintStyle: TextStyle(
+                            // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                            color: colorScheme.onSurfaceVariant,
+                          ),
                         ),
                         onSubmitted: (_) => _sendMessage(),
                       ),
@@ -769,7 +821,11 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   const SizedBox(width: 8),
                   Material(
-                    color: _hasText ? _primaryColor : Colors.grey.shade300,
+                    // 🟢 Enabled → brand biru; disabled → surfaceContainerHighest
+                    // (light ≈ #E0E3EA mirip grey.shade300, dark ≈ #2A3038)
+                    color: _hasText
+                        ? _primaryColor
+                        : colorScheme.surfaceContainerHighest,
                     shape: const CircleBorder(),
                     child: InkWell(
                       customBorder: const CircleBorder(),
@@ -791,6 +847,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
+/// ⚠️ FULLSCREEN ZOOMABLE IMAGE VIEWER — SENGAJA tidak diubah.
+/// Latar hitam & teks putih adalah standar UX photo-viewer
+/// di kedua mode terang maupun gelap.
 class _ZoomableImageViewer extends StatefulWidget {
   final String networkUrl;
   final String heroTag;

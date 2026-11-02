@@ -5,8 +5,8 @@ import 'package:rentalcar/config/api_config.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:rentalcar/menu/profil.dart'; // 🟢 TAMBAHAN: untuk redirect ke halaman Profil
-import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/menu/profil.dart';
+import 'package:rentalcar/services/api_client.dart';
 
 class RentalApplicationPage extends StatefulWidget {
   const RentalApplicationPage({super.key});
@@ -19,7 +19,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
   final _formKey = GlobalKey<FormState>();
 
   final TextEditingController _businessNameController = TextEditingController();
-  final TextEditingController _businessAddressController = TextEditingController();
+  final TextEditingController _businessAddressController =
+      TextEditingController();
 
   String _status = 'pending';
   String? _adminNotes;
@@ -33,12 +34,12 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
   final MapController _mapController = MapController();
   bool _hasSelectedLocation = false;
 
-  // ================= WARNA SENADA DENGAN HALAMAN LAIN =================
+  // ================= BRAND & SEMANTIC COLORS (tetap) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  static const Color _bgColor = Color(0xFFF4F6F9);
   static const Color _successColor = Color(0xFF16A34A);
   static const Color _dangerColor = Color(0xFFDC2626);
+  // 🟢 DIHAPUS: _bgColor
 
   @override
   void initState() {
@@ -53,16 +54,12 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     super.dispose();
   }
 
-  /// Ambil status pengajuan dari backend Laravel
   Future<void> _fetchApplicationStatus() async {
     try {
-      // 🟢 Token & refresh diurus ApiClient (tidak baca prefs lagi).
       final response = await ApiClient.instance
           .get(Uri.parse('${ApiConfig.baseUrl}/rental-application'))
           .timeout(const Duration(seconds: 20));
 
-      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
-      // halaman ini sudah tidak ada.
       if (!mounted) return;
 
       if (response.statusCode == 200) {
@@ -72,7 +69,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
         if (appData != null) {
           setState(() {
             _businessNameController.text = appData['business_name'] ?? '';
-            _businessAddressController.text = appData['business_address'] ?? '';
+            _businessAddressController.text =
+                appData['business_address'] ?? '';
             _status = appData['status'] ?? 'pending';
             _adminNotes = appData['admin_notes'];
 
@@ -91,7 +89,6 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     }
   }
 
-  /// Panggil Endpoint Reverse Geocode ke Backend Laravel
   Future<void> _reverseGeocode(double lat, double lng) async {
     setState(() {
       _latitude = lat;
@@ -126,7 +123,6 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     }
   }
 
-  /// Ambil lokasi GPS perangkat saat ini menggunakan Geolocator
   Future<void> _getCurrentLocation() async {
     bool serviceEnabled;
     LocationPermission permission;
@@ -164,20 +160,19 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     }
   }
 
-  /// Kirim / Update Pengajuan ke Backend API
   Future<void> _submitApplication() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (!_hasSelectedLocation) {
-      _showSnackBar('Silakan tandai lokasi usaha Anda di peta terlebih dahulu.', _dangerColor);
+      _showSnackBar(
+          'Silakan tandai lokasi usaha Anda di peta terlebih dahulu.',
+          _dangerColor);
       return;
     }
 
     setState(() => _isSubmitting = true);
 
     try {
-      // 🟢 Token & refresh diurus ApiClient. POST JSON biasa (bukan multipart),
-      // jadi otomatis di-retry sekali kalau kena 401.
       final response = await ApiClient.instance
           .post(
             Uri.parse('${ApiConfig.baseUrl}/rental-application'),
@@ -194,11 +189,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
           )
           .timeout(const Duration(seconds: 30));
 
-      // Kalau sesi mati, ApiClient sudah memindahkan ke LoginPage dan
-      // halaman ini sudah tidak ada. Jangan lanjut pakai context.
       if (!mounted) return;
 
-      // Decode aman: respons non-JSON tidak melempar FormatException.
       Map<String, dynamic> responseData = {};
       try {
         final decoded = jsonDecode(response.body);
@@ -207,17 +199,11 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
 
       if (response.statusCode == 200) {
         _showSnackBar('Pengajuan perental berhasil dikirim!', _successColor);
-        _fetchApplicationStatus(); // Refresh status
+        _fetchApplicationStatus();
       } else if (response.statusCode == 401) {
-        // Sampai sini berarti refresh gagal sementara (jaringan/server),
-        // bukan sesi mati (kalau sesi mati, sudah ke LoginPage).
         throw Exception(
             'Sesi belum bisa diperbarui. Periksa koneksi lalu coba lagi.');
       } else {
-        // 🟢 TAMBAHAN: Cek apakah error-nya spesifik "data personal belum lengkap"
-        // (dikirim backend dengan key 'personal_data' di dalam 'errors').
-        // Kalau iya, arahkan user langsung ke halaman Profil untuk melengkapi
-        // data (phone, KTP, SIM) alih-alih cuma menampilkan snackbar biasa.
         final errors = responseData['errors'];
         if (errors is Map && errors['personal_data'] != null) {
           final dynamic raw = errors['personal_data'];
@@ -227,7 +213,6 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
 
           _showSnackBar(message, _dangerColor);
 
-          // Jeda sebentar biar snackbar sempat terbaca sebelum pindah halaman
           await Future.delayed(const Duration(milliseconds: 800));
 
           if (mounted) {
@@ -236,10 +221,11 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
               MaterialPageRoute(builder: (context) => const ProfilPage()),
             );
           }
-          return; // Hentikan di sini, jangan lanjut ke throw Exception generic
+          return;
         }
 
-        String errorMessage = responseData['message'] ?? 'Gagal mengirim pengajuan';
+        String errorMessage =
+            responseData['message'] ?? 'Gagal mengirim pengajuan';
         throw Exception(errorMessage);
       }
     } on TimeoutException {
@@ -258,7 +244,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: color,
+        backgroundColor: color, // 🟢 semantic, tetap
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
@@ -266,7 +252,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     );
   }
 
-  // ================= HELPER STATUS =================
+  // ================= HELPER STATUS (tetap semantic) =================
   Color _getStatusColor() {
     switch (_status) {
       case 'approved':
@@ -313,23 +299,25 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final statusColor = _getStatusColor();
 
     return Scaffold(
-      backgroundColor: _bgColor,
+      // 🟢 DIHAPUS: backgroundColor: _bgColor
       appBar: AppBar(
         title: const Text(
           'Pengajuan Perental',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
         centerTitle: false,
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1E293B),
+        // 🟢 AppBar pakai token tema
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: colorScheme.surface,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey.shade200),
+          child: Container(height: 1, color: colorScheme.outlineVariant),
         ),
       ),
       body: _isLoading
@@ -365,15 +353,19 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
 
   // ================= CARD: STATUS =================
   Widget _buildStatusCard(Color statusColor) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            // 🟢 Shadow dari tema
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -388,7 +380,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.15, biar tetap kelihatan di dark
+                  color: statusColor.withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(_getStatusIcon(), color: statusColor, size: 24),
@@ -402,7 +395,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                       'Status Pengajuan',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.grey.shade500,
+                        // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+                        color: colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.3,
                       ),
@@ -410,19 +404,22 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                     const SizedBox(height: 2),
                     Text(
                       _getStatusLabel(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15.5,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF1E293B),
+                        // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                        color: colorScheme.onSurface,
                       ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
+                  // 🟢 0.1 → 0.15
+                  color: statusColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -441,7 +438,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
             _getStatusDescription(),
             style: TextStyle(
               fontSize: 12.5,
-              color: Colors.grey.shade600,
+              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
               height: 1.4,
             ),
           ),
@@ -451,23 +449,24 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _primaryColor.withOpacity(0.05),
+                // 🟢 0.05 → 0.12, 0.15 → 0.30 biar tetap kelihatan di dark
+                color: _primaryColor.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _primaryColor.withOpacity(0.15)),
+                border: Border.all(color: _primaryColor.withOpacity(0.30)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.chat_bubble_outline_rounded,
+                      const Icon(Icons.chat_bubble_outline_rounded,
                           size: 13, color: _primaryColor),
                       const SizedBox(width: 6),
-                      Text(
+                      const Text(
                         'Catatan dari Admin',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: _primaryColor,
+                          color: _primaryColor, // brand
                           fontSize: 11.5,
                         ),
                       ),
@@ -476,7 +475,11 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                   const SizedBox(height: 6),
                   Text(
                     _adminNotes!,
-                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF1E293B)),
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                      color: colorScheme.onSurface,
+                    ),
                   ),
                 ],
               ),
@@ -489,24 +492,34 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
 
   // ================= BANNER INFO PERSYARATAN =================
   Widget _buildInfoBanner() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bool isDark = theme.brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _primaryColor.withOpacity(0.06),
+        // 🟢 0.06 → 0.12, 0.15 → 0.30
+        color: _primaryColor.withOpacity(0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _primaryColor.withOpacity(0.15)),
+        border: Border.all(color: _primaryColor.withOpacity(0.30)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline_rounded, color: _primaryColor, size: 18),
+          const Icon(Icons.info_outline_rounded,
+              color: _primaryColor, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               'Pastikan Anda sudah melengkapi Foto KTP dan Foto SIM di menu Profil sebelum mengirim pengajuan ini.',
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.blue.shade900,
+                // 🟢 Light: tetap biru gelap (nuansa biru);
+                //    Dark: biru muda terang supaya kontras di atas bg gelap
+                color: isDark
+                    ? Colors.lightBlue.shade200
+                    : Colors.blue.shade900,
                 height: 1.4,
               ),
             ),
@@ -517,26 +530,32 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
   }
 
   Widget _buildSectionTitle(String title) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 13.5,
         fontWeight: FontWeight.bold,
-        color: Color(0xFF1E293B),
+        // 🟢 Ganti Color(0xFF1E293B) → onSurface
+        color: colorScheme.onSurface,
       ),
     );
   }
 
   // ================= CARD: FORM & PETA =================
   Widget _buildFormCard() {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        // 🟢 Ganti Colors.white → colorScheme.surface
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -556,15 +575,22 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Tandai Lokasi Usaha di Peta *',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                  // 🟢 Ganti Color(0xFF1E293B) → onSurface
+                  color: colorScheme.onSurface,
+                ),
               ),
               TextButton.icon(
                 onPressed: _getCurrentLocation,
                 icon: const Icon(Icons.my_location, size: 14),
-                label: const Text('Lokasi Saya', style: TextStyle(fontSize: 11.5)),
-                style: TextButton.styleFrom(foregroundColor: _primaryColor),
+                label: const Text('Lokasi Saya',
+                    style: TextStyle(fontSize: 11.5)),
+                style: TextButton.styleFrom(
+                    foregroundColor: _primaryColor), // brand
               ),
             ],
           ),
@@ -575,11 +601,14 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
             width: double.infinity,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade300),
+              // 🟢 Ganti Colors.grey.shade300 → outlineVariant
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             clipBehavior: Clip.hardEdge,
             child: Stack(
               children: [
+                // ⚠️ PETA OSM: tile selalu terang dari server,
+                // tidak bisa di-dark-mode-kan dari sini. Dibiarkan.
                 FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
@@ -591,7 +620,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.example.rentalcar',
                     ),
                     MarkerLayer(
@@ -602,6 +632,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                           height: 40,
                           child: const Icon(
                             Icons.location_pin,
+                            // 🟢 Merah marker — tetap (kontras di atas tile)
                             color: Colors.red,
                             size: 40,
                           ),
@@ -611,7 +642,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                   ],
                 ),
 
-                // ➕ ➖ Tombol Zoom In / Zoom Out di Pojok Kanan Bawah Peta
+                // ➕ ➖ Tombol Zoom — tetap putih + hitam karena
+                // memang di atas tile OSM yang terang.
                 Positioned(
                   right: 12,
                   bottom: 12,
@@ -623,7 +655,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                         foregroundColor: Colors.black87,
                         onPressed: () {
                           final currentZoom = _mapController.camera.zoom;
-                          _mapController.move(_mapController.camera.center, currentZoom + 1);
+                          _mapController.move(_mapController.camera.center,
+                              currentZoom + 1);
                         },
                         child: const Icon(Icons.add, size: 20),
                       ),
@@ -634,7 +667,8 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
                         foregroundColor: Colors.black87,
                         onPressed: () {
                           final currentZoom = _mapController.camera.zoom;
-                          _mapController.move(_mapController.camera.center, currentZoom - 1);
+                          _mapController.move(_mapController.camera.center,
+                              currentZoom - 1);
                         },
                         child: const Icon(Icons.remove, size: 20),
                       ),
@@ -644,6 +678,7 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
 
                 if (_isGeocoding)
                   Container(
+                    // 🟢 Overlay netral — tetap (hanya redupkan peta saat loading)
                     color: Colors.black.withOpacity(0.2),
                     child: const Center(
                       child: CircularProgressIndicator(color: _primaryColor),
@@ -657,7 +692,12 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
             _hasSelectedLocation
                 ? 'Koordinat: ${_latitude.toStringAsFixed(5)}, ${_longitude.toStringAsFixed(5)}'
                 : 'Ketuk pada peta untuk menandai titik lokasi usaha Anda.',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+            style: TextStyle(
+              fontSize: 11,
+              // 🟢 Ganti Colors.grey.shade600 → onSurfaceVariant
+              color: colorScheme.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -681,38 +721,58 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
     int maxLines = 1,
     String? Function(String?)? validator,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return TextFormField(
       controller: controller,
       maxLines: maxLines,
       validator: validator,
-      style: const TextStyle(fontSize: 13.5),
+      style: TextStyle(
+        fontSize: 13.5,
+        // 🟢 Teks input ikut tema
+        color: colorScheme.onSurface,
+      ),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+        labelStyle: TextStyle(
+          // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+          color: colorScheme.onSurfaceVariant,
+          fontSize: 13,
+        ),
         alignLabelWithHint: true,
         prefixIcon: Padding(
           padding: EdgeInsets.only(bottom: maxLines > 1 ? 40 : 0),
-          child: Icon(icon, size: 19, color: Colors.grey.shade500),
+          child: Icon(
+            icon,
+            size: 19,
+            // 🟢 Ganti Colors.grey.shade500 → onSurfaceVariant
+            color: colorScheme.onSurfaceVariant,
+          ),
         ),
         filled: true,
-        fillColor: _bgColor,
+        // 🟢 Ganti _bgColor → surfaceContainerHighest
+        fillColor: colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
+          // 🟢 Ganti Colors.grey.shade200 → outlineVariant
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
+          // 🟢 Brand primary — tetap
           borderSide: const BorderSide(color: _primaryColor, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
+          // 🟢 Merah semantic — tetap
           borderSide: const BorderSide(color: _dangerColor),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
     );
   }
@@ -725,11 +785,13 @@ class _RentalApplicationPageState extends State<RentalApplicationPage> {
       child: ElevatedButton.icon(
         onPressed: _isSubmitting ? null : _submitApplication,
         style: ElevatedButton.styleFrom(
+          // 🟢 Brand biru, tetap sama di kedua mode
           backgroundColor: _primaryColor,
           foregroundColor: Colors.white,
           elevation: 0,
           disabledBackgroundColor: _primaryColor.withOpacity(0.5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         icon: _isSubmitting
             ? const SizedBox.shrink()

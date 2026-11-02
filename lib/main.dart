@@ -11,7 +11,9 @@ import 'package:rentalcar/services/token_storage.dart'; // 🟢 TAMBAHAN
 import 'package:rentalcar/services/api_client.dart'; // 🟢 TAMBAHAN
 import 'package:rentalcar/utils/navigation_service.dart'; // 👈 satu-satunya sumber navigatorKey
 import 'package:rentalcar/utils/user_prefs.dart'; // 🟢 TAMBAHAN: daftar key prefs bersama
+import 'package:rentalcar/utils/theme_controller.dart'; // 🟢 TAMBAHAN: pengelola tema
 import 'firebase_options.dart';
+
 // 🟢 DIHAPUS: import app_notifier.dart tidak diperlukan di sini lagi.
 // scaffoldMessengerKey sudah tidak dipakai karena AppNotifier sekarang
 // pakai QuickAlert (butuh BuildContext lewat navigatorKey), bukan SnackBar.
@@ -19,9 +21,7 @@ import 'firebase_options.dart';
 // 🟢 Top-level function wajib untuk menangkap pesan FCM saat app di background/killed
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   debugPrint("Handling a background message: ${message.messageId}");
 
   // 🟢 DIPERBAIKI: sebelumnya di sini kosong (mengandalkan Android
@@ -53,23 +53,25 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
     const AndroidInitializationSettings androidInit =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initSettings =
-        InitializationSettings(android: androidInit);
+    const InitializationSettings initSettings = InitializationSettings(
+      android: androidInit,
+    );
 
     await plugin.initialize(settings: initSettings);
 
     const AndroidNotificationDetails androidDetails =
         AndroidNotificationDetails(
-      'rental_car_channel_id',
-      'Aktivitas Rental',
-      channelDescription:
-          'Notifikasi status pesanan dan aktivitas rental mobil',
-      importance: Importance.max,
-      priority: Priority.high,
-    );
+          'rental_car_channel_id',
+          'Aktivitas Rental',
+          channelDescription:
+              'Notifikasi status pesanan dan aktivitas rental mobil',
+          importance: Importance.max,
+          priority: Priority.high,
+        );
 
-    const NotificationDetails notifDetails =
-        NotificationDetails(android: androidDetails);
+    const NotificationDetails notifDetails = NotificationDetails(
+      android: androidDetails,
+    );
 
     await plugin.show(
       id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -124,6 +126,10 @@ Future<void> _handleSessionExpired() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 🟢 TAMBAHAN: muat preferensi tema terakhir SEBELUM runApp,
+  // supaya tidak ada "flash" tema salah saat cold start.
+  await ThemeController.load();
+
   // 🟢 TAMBAHAN: pasang callback sesi berakhir. navigatorKey sudah global
   // (dari navigation_service.dart), jadi aman dipasang sebelum runApp;
   // pemakaiannya pakai currentState?. jadi aman kalau UI belum siap.
@@ -145,11 +151,12 @@ void main() async {
   // Kita yang kontrol tampilan sendiri lewat listener onMessage di bawah,
   // supaya bisa dicek dulu status WebSocket-nya (hindari notifikasi dobel).
   try {
-    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-      alert: false,
-      badge: true,
-      sound: false,
-    );
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
+          alert: false,
+          badge: true,
+          sound: false,
+        );
   } catch (e) {
     debugPrint("Foreground presentation options error: $e");
   }
@@ -178,8 +185,9 @@ void main() async {
   await prefs.remove('access_token');
 
   // 3. Tentukan halaman awal berdasarkan status sesi
-  final Widget initialScreen =
-      hasSession ? const Dashboard() : const LoginPage();
+  final Widget initialScreen = hasSession
+      ? const Dashboard()
+      : const LoginPage();
 
   // 🟢 Kalau sesi lama masih ada (app dibuka ulang tanpa login baru),
   // langsung sambungkan WebSocket dari sini.
@@ -188,8 +196,8 @@ void main() async {
   }
 
   // Kalau app dibuka dari kondisi tertutup total dengan cara men-tap notifikasi FCM
-  final RemoteMessage? initialMessage =
-      await FirebaseMessaging.instance.getInitialMessage();
+  final RemoteMessage? initialMessage = await FirebaseMessaging.instance
+      .getInitialMessage();
 
   if (initialMessage != null) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -273,7 +281,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         // foreground tetap seperti kondisi sebelumnya (biasanya masih
         // `true`), sehingga WS tetap berhak menampilkan popup seperti
         // biasa selama interupsi sesaat itu.
-        debugPrint('App inactive (interupsi sesaat) - status foreground tidak diubah.');
+        debugPrint(
+          'App inactive (interupsi sesaat) - status foreground tidak diubah.',
+        );
         break;
 
       case AppLifecycleState.paused:
@@ -286,7 +296,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         // hindari notifikasi dobel.
         NotificationSocketService().isAppInForeground = false;
         debugPrint(
-            'App ke background (proses masih hidup) - WS tetap jalan, tampilan diserahkan ke FCM.');
+          'App ke background (proses masih hidup) - WS tetap jalan, tampilan diserahkan ke FCM.',
+        );
         break;
 
       case AppLifecycleState.detached:
@@ -304,17 +315,44 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey, // 🟢 satu-satunya key, dari navigation_service.dart
-      // 🟢 DIHAPUS: scaffoldMessengerKey — sudah tidak dipakai karena
-      // AppNotifier sekarang pakai QuickAlert (dialog, butuh BuildContext
-      // via navigatorKey), bukan SnackBar (yang butuh ScaffoldMessengerKey).
-      debugShowCheckedModeBanner: false,
-      title: 'Rental Car',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-      ),
-      home: widget.initialScreen,
+    // 🟢 DIUBAH: MaterialApp dibungkus ValueListenableBuilder supaya
+    // otomatis rebuild ketika ThemeController.notifier berubah.
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeController.notifier,
+      builder: (context, mode, _) {
+        return MaterialApp(
+          navigatorKey:
+              navigatorKey, // 🟢 satu-satunya key, dari navigation_service.dart
+          // 🟢 DIHAPUS: scaffoldMessengerKey — sudah tidak dipakai karena
+          // AppNotifier sekarang pakai QuickAlert (dialog, butuh BuildContext
+          // via navigatorKey), bukan SnackBar (yang butuh ScaffoldMessengerKey).
+          debugShowCheckedModeBanner: false,
+          title: 'Rental Car',
+
+          // 🟢 Light theme
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.blue,
+              brightness: Brightness.light,
+            ),
+          ),
+
+          // 🟢 Dark theme — seedColor sama, otomatis harmonis
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.blue,
+              brightness: Brightness.dark,
+            ),
+          ),
+
+          // 🟢 Sumber kebenaran mode: system / light / dark
+          themeMode: mode,
+
+          home: widget.initialScreen,
+        );
+      },
     );
   }
 }
