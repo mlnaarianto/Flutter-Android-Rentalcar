@@ -7,7 +7,7 @@ import 'package:rentalcar/menu/rentals_booking_page.dart';
 import 'package:rentalcar/menu/chat.dart';
 import 'package:rentalcar/menu/driver_bookings_page.dart';
 import 'package:rentalcar/enums/app_enums.dart';
-import 'package:rentalcar/utils/theme_controller.dart'; // 🟢 TAMBAHAN
+import 'package:rentalcar/utils/theme_controller.dart';
 
 class Sidebar extends StatefulWidget {
   final String userName;
@@ -29,13 +29,14 @@ class _SidebarState extends State<Sidebar> {
   String? _avatarUrl;
   String? _userId;
 
-  // 🟢 FIX: sebelumnya receiver_id CS di _openAdminChat() hardcode ke '1'.
-  // Sekarang diambil dari GET /api/support-agent (query berdasarkan
-  // Permission::ReceiveSupportChat di backend, bukan ID tetap). Null
-  // selama belum selesai fetch / fetch gagal -> _openAdminChat() akan
-  // fallback ke '1' supaya menu tetap bisa dipakai walau endpoint ini
-  // belum siap atau permission belum di-assign ke siapa pun.
+  // ID admin/CS diambil dari GET /api/support-agent (berdasarkan
+  // Permission::ReceiveSupportChat di backend). Null selama belum selesai
+  // fetch / fetch gagal -> _openAdminChat() fallback ke '1'.
   String? _supportAgentId;
+
+  // 🟢 BARU: avatar admin/CS dari response yang sama (data.avatar_url).
+  // Null kalau belum selesai fetch, gagal, atau admin belum punya avatar.
+  String? _supportAgentAvatar;
 
   // Tag unik untuk animasi Hero avatar sidebar -> fullscreen viewer
   static const String _avatarHeroTag = 'sidebar-user-avatar';
@@ -43,7 +44,6 @@ class _SidebarState extends State<Sidebar> {
   // ================= BRAND COLORS (tetap di light & dark) =================
   static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFFF97316);
-  // 🟢 DIHAPUS: _bgColor — Drawer sekarang pakai colorScheme.surface
 
   @override
   void initState() {
@@ -57,23 +57,21 @@ class _SidebarState extends State<Sidebar> {
 
     setState(() {
       _avatarUrl = prefs.getString('avatar_url');
-      // SENGAJA tidak diberi fallback hardcode (mis. '3') di sini. Kalau
-      // user_id belum tersimpan di SharedPreferences (mis. race condition
-      // sesaat setelah login), _userId akan tetap null dan setiap aksi yang
-      // butuh identitas user (mis. buka Chat Admin) akan di-guard secara
-      // eksplisit -- bukan diam-diam "menyamar" jadi user ID lain.
+      // SENGAJA tidak diberi fallback hardcode. Kalau user_id belum
+      // tersimpan, _userId tetap null dan aksi yang butuh identitas user
+      // (mis. buka Chat Admin) di-guard secara eksplisit.
       _userId = prefs.getString('user_id');
     });
 
     await _loadSupportAgentId();
   }
 
-  /// ================= AMBIL ID ADMIN/CS SECARA DINAMIS =================
+  /// ================= AMBIL DATA ADMIN/CS SECARA DINAMIS =================
   /// Panggil GET /api/support-agent sekali saat Sidebar dibuka.
   ///
   /// Kalau gagal (network error, 404 karena permission belum di-assign ke
-  /// siapa pun, dsb), _supportAgentId dibiarkan null dan _openAdminChat()
-  /// akan pakai fallback '1'.
+  /// siapa pun, dsb), _supportAgentId & _supportAgentAvatar dibiarkan null
+  /// dan _openAdminChat() memakai fallback.
   Future<void> _loadSupportAgentId() async {
     try {
       final response = await ApiClient.instance.get(
@@ -83,15 +81,22 @@ class _SidebarState extends State<Sidebar> {
       if (response.statusCode != 200) return;
 
       final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final id = body['data']?['id'];
+
+      // 🟢 BARU: ambil seluruh object `data`, bukan hanya `id`
+      final agent = body['data'] as Map<String, dynamic>?;
+      final id = agent?['id'];
+      final avatar = agent?['avatar_url'];
 
       if (id != null && mounted) {
         setState(() {
           _supportAgentId = id.toString();
+          _supportAgentAvatar = (avatar is String && avatar.isNotEmpty)
+              ? _hiResAvatarUrl(avatar, size: 200)
+              : null;
         });
       }
     } catch (_) {
-      // Diamkan -- fallback ID lama tetap dipakai lewat _openAdminChat().
+      // Diamkan -- fallback tetap dipakai lewat _openAdminChat().
     }
   }
 
@@ -157,6 +162,7 @@ class _SidebarState extends State<Sidebar> {
           currentUserName: widget.userName,
           receiverId: _supportAgentId ?? '1',
           receiverName: "Admin Rental (CS)",
+          receiverAvatarUrl: _supportAgentAvatar, // 🟢 BARU
         ),
       ),
     );
@@ -265,8 +271,6 @@ class _SidebarState extends State<Sidebar> {
           children: [
             // ================= HEADER PROFIL =================
             // ⚠️ ZONA BIRU: semua warna di dalamnya SENGAJA tidak diubah.
-            // Latar gradient selalu biru, teks putih, border ring putih —
-            // kontras sama di light maupun dark.
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
@@ -288,7 +292,7 @@ class _SidebarState extends State<Sidebar> {
                           padding: const EdgeInsets.all(3),
                           decoration: const BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Colors.white, // ring putih di atas gradient biru
+                            color: Colors.white,
                           ),
                           child: Hero(
                             tag: _avatarHeroTag,
@@ -426,7 +430,7 @@ class _SidebarState extends State<Sidebar> {
                     _sectionLabel('MENU DRIVER'),
                     _menuItem(
                       icon: Icons.directions_car_filled_rounded,
-                      iconColor: const Color(0xFF7C3AED), // ungu brand
+                      iconColor: const Color(0xFF7C3AED),
                       title: 'Tugas Penugasan',
                       subtitle: 'Lihat jadwal & tugas antar-jemput',
                       onTap: () {
@@ -463,15 +467,13 @@ class _SidebarState extends State<Sidebar> {
                   ],
 
                   // ================= TAMPILAN =================
-                  // 🟢 TAMBAHAN: section toggle tema
                   const Divider(height: 24),
                   _sectionLabel('TAMPILAN'),
                   ValueListenableBuilder<ThemeMode>(
                     valueListenable: ThemeController.notifier,
                     builder: (context, mode, _) {
-                      // 🟢 Kalau mode masih "system", baca brightness OS
-                      // supaya status switch mencerminkan kondisi nyata
-                      // (bukan selalu tampil "off" padahal HP sedang dark).
+                      // Kalau mode masih "system", baca brightness OS
+                      // supaya status switch mencerminkan kondisi nyata.
                       final isDark = mode == ThemeMode.dark ||
                           (mode == ThemeMode.system &&
                               MediaQuery.platformBrightnessOf(context) ==
@@ -505,10 +507,6 @@ class _SidebarState extends State<Sidebar> {
                         contentPadding:
                             const EdgeInsets.symmetric(horizontal: 20),
                         onChanged: (value) {
-                          // 🟢 Set eksplisit ke light/dark.
-                          // Setelah ini, mode tidak lagi "system" —
-                          // user sudah override manual, pilihannya
-                          // disimpan permanen oleh ThemeController.
                           ThemeController.set(
                             value ? ThemeMode.dark : ThemeMode.light,
                           );
@@ -517,9 +515,8 @@ class _SidebarState extends State<Sidebar> {
                     },
                   ),
 
-                  // 🟢 OPSIONAL: tombol balik ke "Ikuti Sistem".
-                  // Hanya muncul kalau user sudah pernah override manual,
-                  // jadi user baru tidak bingung.
+                  // Tombol balik ke "Ikuti Sistem" (muncul hanya kalau
+                  // user sudah pernah override manual).
                   ValueListenableBuilder<ThemeMode>(
                     valueListenable: ThemeController.notifier,
                     builder: (context, mode, _) {
